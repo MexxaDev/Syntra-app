@@ -1,0 +1,52 @@
+{
+  "categories": [
+    { "id": "cat_1", "name": "Bebidas", "description": "Refrescos, jugos, aguas", "color": "#3B82F6" },
+    { "id": "cat_2", "name": "Alimentos", "description": "Snacks, comida rápida", "color": "#10B981" },
+    { "id": "cat_3", "name": "Lácteos", "description": "Leches, quesos, yogures", "color": "#F59E0B" },
+    { "id": "cat_4", "name": "Limpieza", "description": "Detergentes, jabones", "color": "#8B5CF6" },
+    { "id": "cat_5", "name": "Electrónica", "description": "Accesorios y gadgets", "color": "#EF4444" }
+  ],
+  "products": [
+    { "id": "prod_1", "name": "Coca Cola 500ml", "price": 150, "stock": 50, "categoryId": "cat_1", "barcode": "7791234567890", "sku": "CC-500", "visible": true, "visible_web": true, "price_web": 180, "description": "Bebida gaseosa refrescante", "image": "" },
+    { "id": "prod_2", "name": "Agua Mineral 1L", "price": 100, "stock": 100, "categoryId": "cat_1", "barcode": "7791234567891", "sku": "AM-1000", "visible": true, "visible_web": true, "price_web": 120, "description": "Agua mineral natural", "image": "" },
+    { "id": "prod_3", "name": "Sándwich de Miga", "price": 250, "stock": 20, "categoryId": "cat_2", "barcode": "7791234567892", "sku": "SM-001", "visible": true, "visible_web": true, "price_web": 300, "description": "Sandwich fresco y delicioso", "image": "" },
+    { "id": "prod_4", "name": "Yogur Frutilla 1kg", "price": 300, "stock": 30, "categoryId": "cat_3", "barcode": "7791234567893", "sku": "YF-1000", "visible": true, "visible_web": false, "price_web": null, "description": "", "image": "" },
+    { "id": "prod_5", "name": "Detergente 500ml", "price": 200, "stock": 40, "categoryId": "cat_4", "barcode": "7791234567894", "sku": "DE-500", "visible": true, "visible_web": false, "price_web": null, "description": "", "image": "" },
+    { "id": "prod_6", "name": "Cable USB-C", "price": 800, "stock": 15, "categoryId": "cat_5", "barcode": "7791234567895", "sku": "CB-USB-C", "visible": true, "visible_web": false, "price_web": null, "description": "", "image": "" },
+    { "id": "prod_7", "name": "Galletas 100g", "price": 120, "stock": 60, "categoryId": "cat_2", "barcode": "7791234567896", "sku": "GA-100", "visible": true, "visible_web": true, "price_web": 150, "description": "Galletas de vainilla", "image": "" },
+    { "id": "prod_8", "name": "Leche Entera 1L", "price": 180, "stock": 0, "categoryId": "cat_3", "barcode": "7791234567897", "sku": "LE-1000", "visible": true, "visible_web": true, "price_web": 200, "description": "Leche entera fortificada", "image": "" },
+    { "id": "prod_9", "name": "Hamburguesa Clásica", "price": 500, "stock": 25, "categoryId": "cat_2", "barcode": "7791234567898", "sku": "HC-001", "visible": true, "visible_web": true, "price_web": 600, "description": "Hamburguesa con lechuga y tomate", "image": "" },
+    { "id": "prod_10", "name": "Papas Fritas", "price": 200, "stock": 35, "categoryId": "cat_2", "barcode": "7791234567899", "sku": "PF-001", "visible": true, "visible_web": true, "price_web": 250, "description": "Papas fritas crocantes", "image": "" },
+    { "id": "prod_11", "name": "Pizza Mozzarella", "price": 800, "stock": 15, "categoryId": "cat_2", "barcode": "7791234567900", "sku": "PZ-001", "visible": true, "visible_web": true, "price_web": 900, "description": "Pizza familiar mozzarella", "image": "" },
+    { "id": "prod_12", "name": "Jugo Naranja 1L", "price": 180, "stock": 40, "categoryId": "cat_1", "barcode": "7791234567901", "sku": "JN-1000", "visible": true, "visible_web": true, "price_web": 200, "description": "Jugo natural de naranja", "image": "" },
+    { "id": "prod_13", "name": "Cerveza Artesanal", "price": 300, "stock": 50, "categoryId": "cat_1", "barcode": "7791234567902", "sku": "CA-001", "visible": true, "visible_web": true, "price_web": 350, "description": "Cerveza artesanal rubia", "image": "" },
+    { "id": "prod_14", "name": "Ensalada Fresca", "price": 350, "stock": 18, "categoryId": "cat_2", "barcode": "7791234567903", "sku": "EF-001", "visible": true, "visible_web": true, "price_web": 400, "description": "Ensalada de hojas verdes", "image": "" },
+    { "id": "prod_15", "name": "Yogur Natural 1kg", "price": 280, "stock": 25, "categoryId": "cat_3", "barcode": "7791234567904", "sku": "YN-1000", "visible": true, "visible_web": true, "price_web": 320, "description": "Yogur natural sin azúcar", "image": "" },
+    { "id": "prod_16", "name": "Limpiador Multiuso", "price": 150, "stock": 60, "categoryId": "cat_4", "barcode": "7791234567905", "sku": "LM-500", "visible": true, "visible_web": false, "price_web": null, "description": "", "image": "" },
+    { "id": "prod_17", "name": "Auriculares Bluetooth", "price": 1500, "stock": 10, "categoryId": "cat_5", "barcode": "7791234567906", "sku": "AB-001", "visible": true, "visible_web": false, "price_web": null, "description": "", "image": "" },
+    { "id": "prod_18", "name": "Sándwich Veggie", "price": 300, "stock": 12, "categoryId": "cat_2", "barcode": "7791234567907", "sku": "SV-001", "visible": true, "visible_web": true, "price_web": 350, "description": "Opción vegetariana", "image": "" },
+    { "id": "prod_19", "name": "Coca Cola 1.5L", "price": 200, "stock": 45, "categoryId": "cat_1", "barcode": "7791234567908", "sku": "CC-1500", "visible": true, "visible_web": true, "price_web": 240, "description": "Mayor rendimiento", "image": "" },
+    { "id": "prod_20", "name": "Leche Descremada 1L", "price": 170, "stock": 30, "categoryId": "cat_3", "barcode": "7791234567909", "sku": "LD-1000", "visible": true, "visible_web": true, "price_web": 190, "description": "Leche descremada fortificada", "image": "" }
+  ],
+  "users": [
+    { "id": "user_1", "username": "admin", "password": "admin123", "role": "admin", "name": "Administrador" },
+    { "id": "user_2", "username": "cajero", "password": "cajero123", "role": "cajero", "name": "Cajero" }
+  ],
+  "settings": [
+    { "key": "businessName", "value": "Mi Negocio" },
+    { "key": "currency", "value": "ARS" },
+    { "key": "currencySymbol", "value": "$" },
+    { "key": "taxRate", "value": "21" },
+    { "key": "ticketFooter", "value": "Gracias por su compra!" },
+    { "key": "shop_enabled", "value": "true" },
+    { "key": "shop_whatsapp", "value": "5491123456789" },
+    { "key": "shop_primary_color", "value": "#7C3AED" },
+    { "key": "shop_hours_open", "value": "09:00" },
+    { "key": "shop_hours_close", "value": "23:00" },
+    { "key": "shop_takeaway_enabled", "value": "true" },
+    { "key": "shop_delivery_enabled", "value": "true" },
+    { "key": "shop_min_delivery", "value": "0" },
+    { "key": "shop_delivery_cost", "value": "0" },
+    { "key": "shop_banner", "value": "" }
+  ]
+}
