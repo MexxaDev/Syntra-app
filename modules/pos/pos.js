@@ -1,15 +1,17 @@
 'use strict';
 
-import { productRepo, customerRepo, saleRepo, saleItemRepo } from '../../db/repositories.js';
+import { productRepo, customerRepo, saleRepo, saleItemRepo, categoryRepo } from '../../db/repositories.js';
 import { settingRepo } from '../../db/repositories.js';
 import Toast from '../../components/toast.js';
 import state from '../../js/state.js';
 import { format } from '../../utils/currency.js';
+import { getProductImage } from '../../utils/imageHelper.js';
 
 class POS {
   constructor() {
     this.cart = [];
     this.products = [];
+    this.categories = [];
     this.customers = [];
     this.currentCustomer = null;
     this.discount = 0;
@@ -20,9 +22,17 @@ class POS {
   }
 
   async loadProducts() {
-    this.products = await productRepo.findAll();
-    this.customers = await customerRepo.findAll();
-    const settings = await settingRepo.findAll();
+    const [products, customers, settings, categories] = await Promise.all([
+      productRepo.findAll(),
+      customerRepo.findAll(),
+      settingRepo.findAll(),
+      categoryRepo.findAll()
+    ]);
+
+    this.products = products;
+    this.categories = categories;
+    this.customers = customers;
+
     const settingsObj = {};
     settings.forEach(s => settingsObj[s.key] = s.value);
     this.taxRate = parseFloat(settingsObj.taxRate) || 21;
@@ -108,15 +118,20 @@ class POS {
       return;
     }
 
-    container.innerHTML = products.map(product => `
-      <div class="pos-product-card" data-id="${product.id}">
-        <div class="pos-product-card__image">
-          ${product.image ? `<img src="${product.image}" alt="${product.name}" style="width:100%;height:100%;object-fit:cover;">` : `<i class="fa-solid fa-box"></i>`}
+    const placeholder = getProductImage({ name: 'Product', image: '' }, []);
+
+    container.innerHTML = products.map(product => {
+      const imageSrc = getProductImage(product, this.categories);
+      return `
+        <div class="pos-product-card" data-id="${product.id}">
+          <div class="pos-product-card__image">
+            <img src="${imageSrc}" alt="${product.name}" style="width:100%;height:100%;object-fit:cover;" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">
+          </div>
+          <div class="pos-product-card__name">${product.name}</div>
+          <div class="pos-product-card__price">${format(product.price)}</div>
         </div>
-        <div class="pos-product-card__name">${product.name}</div>
-        <div class="pos-product-card__price">${format(product.price)}</div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
     container.querySelectorAll('.pos-product-card').forEach(card => {
       card.addEventListener('click', () => {
@@ -157,24 +172,29 @@ class POS {
       return;
     }
 
-    container.innerHTML = this.cart.map((item, index) => `
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-3);border-bottom:1px solid var(--color-border-light);">
-        <div style="display:flex;align-items:center;gap:var(--space-3);flex:1;">
-          <div style="width:40px;height:40px;border-radius:var(--radius-md);overflow:hidden;flex-shrink:0;background:var(--color-gray-100);display:flex;align-items:center;justify-content:center;">
-            ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width:100%;height:100%;object-fit:cover;">` : `<i class="fa-solid fa-box" style="color:var(--color-text-secondary);font-size:16px;"></i>`}
+    const placeholder = getProductImage({ name: 'Product', image: '' }, []);
+
+    container.innerHTML = this.cart.map((item, index) => {
+      const imageSrc = getProductImage(item, this.categories);
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-3);border-bottom:1px solid var(--color-border-light);">
+          <div style="display:flex;align-items:center;gap:var(--space-3);flex:1;">
+            <div style="width:40px;height:40px;border-radius:var(--radius-md);overflow:hidden;flex-shrink:0;background:var(--color-gray-100);">
+              <img src="${imageSrc}" alt="${item.name}" style="width:100%;height:100%;object-fit:cover;" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">
+            </div>
+            <div>
+              <div style="font-weight:var(--font-medium);font-size:var(--text-sm);">${item.name}</div>
+              <div style="color:var(--color-text-secondary);font-size:var(--text-xs);">${format(item.price)} x ${item.quantity}</div>
+            </div>
           </div>
-          <div>
-            <div style="font-weight:var(--font-medium);font-size:var(--text-sm);">${item.name}</div>
-            <div style="color:var(--color-text-secondary);font-size:var(--text-xs);">${format(item.price)} x ${item.quantity}</div>
+          <div style="display:flex;align-items:center;gap:var(--space-2);">
+            <button class="btn-remove" data-index="${index}" style="width:24px;height:24px;border-radius:50%;background:var(--color-gray-100);">-</button>
+            <span style="font-weight:var(--font-semibold);">${item.quantity}</span>
+            <button class="btn-add" data-index="${index}" style="width:24px;height:24px;border-radius:50%;background:var(--color-primary-100);color:var(--color-primary);">+</button>
           </div>
         </div>
-        <div style="display:flex;align-items:center;gap:var(--space-2);">
-          <button class="btn-remove" data-index="${index}" style="width:24px;height:24px;border-radius:50%;background:var(--color-gray-100);">-</button>
-          <span style="font-weight:var(--font-semibold);">${item.quantity}</span>
-          <button class="btn-add" data-index="${index}" style="width:24px;height:24px;border-radius:50%;background:var(--color-primary-100);color:var(--color-primary);">+</button>
-        </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
     container.querySelectorAll('.btn-remove').forEach(btn => {
       btn.addEventListener('click', () => {

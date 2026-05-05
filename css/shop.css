@@ -1078,8 +1078,451 @@ body.app-active {
     font-size: var(--text-sm);
   }
 
-  .shop-btn-add {
+   .shop-btn-add {
     width: 28px;
     height: 28px;
+  }
+
+   /* Mobile FAB Cart Button - Perfect Circle */
+  #shop-cart-button.shop-cart-button {
+    position: fixed !important;
+    bottom: 16px !important;
+    right: 16px !important;
+    left: auto !important;
+    top: auto !important;
+    width: 56px !important;
+    height: 56px !important;
+    min-width: 56px !important;
+    min-height: 56px !important;
+    max-width: 56px !important;
+    max-height: 56px !important;
+    border-radius: 50% !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15), 0 2px 4px rgba(0,0,0,0.12) !important;
+    animation: fabAppear 0.3s ease !important;
+    background: var(--color-primary) !important;
+    border: none !important;
+    cursor: pointer !important;
+    color: white !important;
+    z-index: 10000 !important;
+    margin: 0 !important;
+    gap: 0 !important;
+  }
+
+  #shop-cart-button.shop-cart-button:hover {
+    transform: scale(1.05) !important;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.2), 0 2px 6px rgba(0,0,0,0.15) !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-info,
+  #shop-cart-button.shop-cart-button .shop-cart-arrow {
+    display: none !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-icon {
+    position: relative !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-icon i {
+    font-size: 20px !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-count {
+    position: absolute !important;
+    top: -6px !important;
+    right: -6px !important;
+    width: 18px !important;
+    height: 18px !important;
+    font-size: 10px !important;
+    background: var(--color-danger);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: var(--font-bold);
+  }
+}
+
+  #shop-cart-button.shop-cart-button:hover {
+    transform: scale(1.05) !important;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.2), 0 2px 6px rgba(0,0,0,0.15) !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-info,
+  #shop-cart-button.shop-cart-button .shop-cart-arrow {
+    display: none !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-icon {
+    position: relative !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-icon i {
+    font-size: 20px !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-count {
+    position: absolute !important;
+    top: -6px !important;
+    right: -6px !important;
+    width: 18px !important;
+    height: 18px !important;
+    font-size: 10px !important;
+    background: var(--color-danger);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: var(--font-bold);
+  }
+}
+
+  #shop-cart-button.shop-cart-button:hover {
+    transform: scale(1.05) !important;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.2), 0 2px 6px rgba(0,0,0,0.15) !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-info,
+  #shop-cart-button.shop-cart-button .shop-cart-arrow {
+    display: none !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-icon {
+    position: relative !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-icon i {
+    font-size: 20px !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-count {
+    position: absolute !important;
+    top: -6px !important;
+    right: -6px !important;
+    width: 18px !important;
+    height: 18px !important;
+    font-size: 10px !important;
+    background: var(--color-danger);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: var(--font-bold);
+  }
+}
+
+@keyframes fabAppear {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+  #shop-cart-button > .shop-cart-button {
+    width: 56px !important;
+    height: 56px !important;
+    min-width: 56px !important;
+    min-height: 56px !important;
+    max-width: 56px !important;
+    max-height: 56px !important;
+    border-radius: 50% !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15), 0 2px 4px rgba(0,0,0,0.12) !important;
+    animation: fabAppear 0.3s ease !important;
+    background: var(--color-primary) !important;
+    border: none !important;
+    cursor: pointer !important;
+    color: white !important;
+    margin: 0 !important;
+    gap: 0 !important;
+  }
+
+  #shop-cart-button > .shop-cart-button:hover {
+    transform: scale(1.05) !important;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.2), 0 2px 6px rgba(0,0,0,0.15) !important;
+  }
+
+  #shop-cart-button > .shop-cart-button .shop-cart-info,
+  #shop-cart-button > .shop-cart-button .shop-cart-arrow {
+    display: none !important;
+  }
+
+  #shop-cart-button > .shop-cart-button .shop-cart-icon {
+    position: relative !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  #shop-cart-button > .shop-cart-button .shop-cart-icon i {
+    font-size: 20px !important;
+  }
+
+  #shop-cart-button > .shop-cart-button .shop-cart-count {
+    position: absolute !important;
+    top: -6px !important;
+    right: -6px !important;
+    width: 18px !important;
+    height: 18px !important;
+    font-size: 10px !important;
+    background: var(--color-danger);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: var(--font-bold);
+  }
+}
+
+@keyframes fabAppear {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+  #shop-cart-button.shop-cart-button {
+    width: 56px !important;
+    height: 56px !important;
+    min-width: 56px !important;
+    min-height: 56px !important;
+    max-width: 56px !important;
+    max-height: 56px !important;
+    border-radius: 50% !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15), 0 2px 4px rgba(0,0,0,0.12) !important;
+    animation: fabAppear 0.3s ease !important;
+    background: var(--color-primary) !important;
+    border: none !important;
+    cursor: pointer !important;
+    color: white !important;
+    margin: 0 !important;
+    gap: 0 !important;
+  }
+
+  #shop-cart-button.shop-cart-button:hover {
+    transform: scale(1.05) !important;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.2), 0 2px 6px rgba(0,0,0,0.15) !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-info,
+  #shop-cart-button.shop-cart-button .shop-cart-arrow {
+    display: none !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-icon {
+    position: relative !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-icon i {
+    font-size: 20px !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-count {
+    position: absolute !important;
+    top: -6px !important;
+    right: -6px !important;
+    width: 18px !important;
+    height: 18px !important;
+    font-size: 10px !important;
+    background: var(--color-danger);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: var(--font-bold);
+  }
+}
+
+@keyframes fabAppear {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+  #shop-cart-button.shop-cart-button:hover {
+    transform: scale(1.05) !important;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.2), 0 2px 6px rgba(0,0,0,0.15) !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-info,
+  #shop-cart-button.shop-cart-button .shop-cart-arrow {
+    display: none !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-icon {
+    position: relative !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-icon i {
+    font-size: 20px !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-count {
+    position: absolute !important;
+    top: -6px !important;
+    right: -6px !important;
+    width: 18px !important;
+    height: 18px !important;
+    font-size: 10px !important;
+    background: var(--color-danger);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: var(--font-bold);
+  }
+}
+
+  #shop-cart-button.shop-cart-button:hover {
+    transform: scale(1.05) !important;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.2), 0 2px 6px rgba(0,0,0,0.15) !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-info,
+  #shop-cart-button.shop-cart-button .shop-cart-arrow {
+    display: none !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-icon {
+    position: relative !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-icon i {
+    font-size: 20px !important;
+  }
+
+  #shop-cart-button.shop-cart-button .shop-cart-count {
+    position: absolute !important;
+    top: -6px !important;
+    right: -6px !important;
+    width: 18px !important;
+    height: 18px !important;
+    font-size: 10px !important;
+    background: var(--color-danger);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: var(--font-bold);
+  }
+}
+
+  #shop-cart-button > .shop-cart-button {
+    width: 56px !important;
+    height: 56px !important;
+    min-width: 56px !important;
+    min-height: 56px !important;
+    max-width: 56px !important;
+    max-height: 56px !important;
+    border-radius: 50% !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15), 0 2px 4px rgba(0,0,0,0.12) !important;
+    animation: fabAppear 0.3s ease !important;
+    background: var(--color-primary) !important;
+    border: none !important;
+    cursor: pointer !important;
+    color: white !important;
+    margin: 0 !important;
+    gap: 0 !important;
+    border-radius: 50% !important;
+  }
+
+  #shop-cart-button > .shop-cart-button:hover {
+    transform: scale(1.05) !important;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.2), 0 2px 6px rgba(0,0,0,0.15) !important;
+  }
+
+  #shop-cart-button > .shop-cart-button .shop-cart-info,
+  #shop-cart-button > .shop-cart-button .shop-cart-arrow {
+    display: none !important;
+  }
+
+  #shop-cart-button > .shop-cart-button .shop-cart-icon {
+    position: relative !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  #shop-cart-button > .shop-cart-button .shop-cart-icon i {
+    font-size: 20px !important;
+  }
+
+  #shop-cart-button > .shop-cart-button .shop-cart-count {
+    position: absolute !important;
+    top: -6px !important;
+    right: -6px !important;
+    width: 18px !important;
+    height: 18px !important;
+    font-size: 10px !important;
+    background: var(--color-danger);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: var(--font-bold);
+  }
+}
+
+@keyframes fabAppear {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
   }
 }

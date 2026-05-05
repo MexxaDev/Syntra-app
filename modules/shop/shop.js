@@ -153,11 +153,11 @@ class Shop {
         ).join('')}
       </div>
 
-      <div class="shop-products-grid" id="shop-products">
-        ${this.getFilteredProducts().map(p =>
-          ShopUI.renderProductCard(p)
-        ).join('')}
-      </div>
+        <div class="shop-products-grid" id="shop-products">
+          ${this.getFilteredProducts().map(p =>
+            ShopUI.renderProductCard(p, this.categories)
+          ).join('')}
+        </div>
 
       ${this.products.length === 0 ? `
         <div class="shop-empty">
@@ -299,7 +299,7 @@ class Shop {
     }
 
     container.innerHTML = products.map(p =>
-      ShopUI.renderProductCard(p)
+      ShopUI.renderProductCard(p, this.categories)
     ).join('');
 
     // Re-setup delegation after re-render

@@ -1,22 +1,22 @@
 'use strict';
 
 import ShopCart from './shopCart.js';
+import { getProductImage } from '../../utils/imageHelper.js';
 
 class ShopUI {
-  static renderProductCard(product) {
+  static renderProductCard(product, categories = []) {
     const price = product.price_web || product.price;
     const isOutOfStock = product.stock !== undefined && product.stock <= 0;
     const hasPromo = product.promo || false;
+    const imageSrc = getProductImage(product, categories);
+    const placeholder = getProductImage({ name: 'Product', image: '' }, []);
 
     return `
       <div class="shop-product-card ${isOutOfStock ? 'out-of-stock' : ''}" data-product-id="${product.id}">
         ${hasPromo ? '<span class="shop-badge-promo">Promo</span>' : ''}
         ${isOutOfStock ? '<div class="shop-out-of-stock-overlay"><span>Agotado</span></div>' : ''}
         <div class="shop-product-image">
-          ${product.image
-            ? `<img src="${product.image}" alt="${product.name}">`
-            : `<div class="shop-product-placeholder"><i class="fa-solid fa-box"></i></div>`
-          }
+          <img src="${imageSrc}" alt="${product.name}" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">
         </div>
         <div class="shop-product-info">
           <h3 class="shop-product-name">${product.name}</h3>
@@ -93,13 +93,13 @@ class ShopUI {
           <button class="shop-modal-close" id="shop-close-modal">&times;</button>
         </div>
         <div class="shop-cart-items">
-          ${items.map(item => `
+          ${items.map(item => {
+            const imageSrc = getProductImage(item, []);
+            const placeholder = getProductImage({ name: 'Product', image: '' }, []);
+            return `
             <div class="shop-cart-item" data-product-id="${item.id}">
               <div class="shop-cart-item-image">
-                ${item.image
-                  ? `<img src="${item.image}" alt="${item.name}">`
-                  : `<div class="shop-product-placeholder-sm"><i class="fa-solid fa-box"></i></div>`
-                }
+                <img src="${imageSrc}" alt="${item.name}" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">
               </div>
               <div class="shop-cart-item-info">
                 <h4>${item.name}</h4>
@@ -120,7 +120,8 @@ class ShopUI {
                 </button>
               </div>
             </div>
-          `).join('')}
+          `;
+          }).join('')}
         </div>
         <div class="shop-cart-footer">
           <div class="shop-cart-subtotal">
