@@ -1,6 +1,6 @@
 {
   "categories": [
-    { "id": "cat_1", "name": "Hamburguesas", "description": "Todas las opciones cuentan con versiones Simple y Doble", "color": "#8B4513" },
+    { "id": "cat_1", "name": "Hamburguesas", "description": "Todas las opciones tienen versiones Simple y Doble", "color": "#8B4513" },
     { "id": "cat_2", "name": "Complementos", "description": "Acompañamientos para tus hamburguesas", "color": "#DEB887" },
     { "id": "cat_3", "name": "Bebidas", "description": "Refrescos, cerveza y tragos", "color": "#4169E1" },
     { "id": "cat_4", "name": "Combos Especiales", "description": "Combinaciones únicas Vice", "color": "#FF6347" }

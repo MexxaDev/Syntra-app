@@ -13,7 +13,7 @@ class Table {
     if (this.data.length === 0) {
       return `
         <div class="empty-state">
-          <div class="empty-state__icon">📭</div>
+          <div class="empty-state__icon"><i class="fa-solid fa-inbox"></i></div>
           <h3 class="empty-state__title">No hay datos</h3>
           <p class="empty-state__description">No se encontraron registros.</p>
         </div>
@@ -42,7 +42,7 @@ class Table {
                     <div class="flex gap-2">
                       ${this.actions.map(action => `
                         <button class="btn btn-sm ${action.class || 'btn-ghost'}" data-action="${action.name}" data-row-index="${index}">
-                          ${action.icon || ''} ${action.label || ''}
+                          ${action.icon ? `<i class="${action.icon}"></i>` : ''} ${action.label || ''}
                         </button>
                       `).join('')}
                     </div>
@@ -88,7 +88,6 @@ class Table {
   update(data) {
     this.data = data;
     if (this.element) {
-      this.element.innerHTML = this.render();
       this.mount(this.element);
     }
   }

@@ -1,11 +1,14 @@
 'use strict';
 
 import { productRepo, customerRepo, saleRepo, saleItemRepo, categoryRepo } from '../../db/repositories.js';
-import { settingRepo } from '../../db/repositories.js';
 import Toast from '../../components/toast.js';
+import Modal from '../../components/modal.js';
 import state from '../../js/state.js';
 import { format } from '../../utils/currency.js';
 import { getProductImage } from '../../utils/imageHelper.js';
+import { PAYMENT_METHODS, getPaymentMethodLabel, getPayments, getPaymentType, validatePayments } from '../../utils/payments.js';
+import { renderTicketBody, showTicketModal } from '../../utils/ticket.js';
+import cashService from '../cash/cashService.js';
 
 class POS {
   constructor() {
@@ -14,18 +17,19 @@ class POS {
     this.categories = [];
     this.customers = [];
     this.currentCustomer = null;
+    this.currentCategory = null;
     this.discount = 0;
     this.discountType = 'percent';
-    this.paymentMethod = 'cash';
-    this.cashReceived = 0;
-    this.taxRate = 21;
+    this.payments = [{ method: 'cash', amount: 0 }];
+    this._isProcessing = false;
   }
 
   async loadProducts() {
-    const [products, customers, settings, categories] = await Promise.all([
+    await cashService.requireActiveSession();
+
+    const [products, customers, categories] = await Promise.all([
       productRepo.findAll(),
       customerRepo.findAll(),
-      settingRepo.findAll(),
       categoryRepo.findAll()
     ]);
 
@@ -33,13 +37,56 @@ class POS {
     this.categories = categories;
     this.customers = customers;
 
-    const settingsObj = {};
-    settings.forEach(s => settingsObj[s.key] = s.value);
-    this.taxRate = parseFloat(settingsObj.taxRate) || 21;
     this.renderProducts();
+    this._injectCategoryPills();
     this.renderCart();
     this.renderCustomerSelect();
     this.setupBarcodeInput();
+    this._renderPaymentUI();
+    this._injectCashButton();
+  }
+
+  _injectCategoryPills() {
+    const container = document.querySelector('.pos-products');
+    if (!container) return;
+
+    let pillsContainer = document.getElementById('pos-category-pills');
+    if (pillsContainer) {
+      pillsContainer.remove();
+    }
+
+    pillsContainer = document.createElement('div');
+    pillsContainer.id = 'pos-category-pills';
+    pillsContainer.className = 'pos-category-pills';
+
+    pillsContainer.innerHTML = `
+      <button class="pos-category-pill ${!this.currentCategory ? 'active' : ''}" data-category-id="all">Todos</button>
+      ${this.categories.map(cat => `
+        <button class="pos-category-pill ${this.currentCategory === cat.id ? 'active' : ''}" data-category-id="${cat.id}">${cat.name}</button>
+      `).join('')}
+    `;
+
+    const searchBar = container.querySelector('.pos-search-bar');
+    const productList = document.getElementById('pos-product-list');
+    if (searchBar && productList) {
+      searchBar.after(pillsContainer);
+    } else {
+      container.insertBefore(pillsContainer, productList);
+    }
+
+    pillsContainer.querySelectorAll('.pos-category-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        const categoryId = pill.dataset.categoryId;
+        this.currentCategory = categoryId === 'all' ? null : categoryId;
+
+        pillsContainer.querySelectorAll('.pos-category-pill').forEach(p => {
+          p.classList.remove('active');
+        });
+        pill.classList.add('active');
+
+        this.renderProducts();
+      });
+    });
   }
 
   setupBarcodeInput() {
@@ -102,7 +149,7 @@ class POS {
     const container = document.getElementById('pos-product-list');
     if (!container) return;
 
-    const searchInput = document.querySelector('.pos-products .form-input');
+    const searchInput = document.querySelector('.pos-search-bar .form-input');
     const query = searchInput ? searchInput.value.toLowerCase() : '';
 
     let products = this.products;
@@ -112,9 +159,12 @@ class POS {
         (p.barcode && p.barcode.includes(query))
       );
     }
+    if (this.currentCategory) {
+      products = products.filter(p => p.categoryId === this.currentCategory);
+    }
 
     if (products.length === 0) {
-      container.innerHTML = '<p style="color:var(--color-text-secondary);padding:var(--space-4);">No hay productos disponibles.</p>';
+      container.innerHTML = '<p class="pos-cart-empty" style="padding:var(--space-4);">No hay productos disponibles.</p>';
       return;
     }
 
@@ -125,7 +175,7 @@ class POS {
       return `
         <div class="pos-product-card" data-id="${product.id}">
           <div class="pos-product-card__image">
-            <img src="${imageSrc}" alt="${product.name}" style="width:100%;height:100%;object-fit:cover;" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">
+            <img src="${imageSrc}" alt="${product.name}" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">
           </div>
           <div class="pos-product-card__name">${product.name}</div>
           <div class="pos-product-card__price">${format(product.price)}</div>
@@ -167,7 +217,7 @@ class POS {
     if (!container) return;
 
     if (this.cart.length === 0) {
-      container.innerHTML = '<div style="text-align:center;color:var(--color-text-secondary);padding:var(--space-8);"><i class="fa-solid fa-cart-shopping" style="font-size:48px;margin-bottom:var(--space-4);display:block;"></i>El carrito está vacío</div>';
+      container.innerHTML = '<div class="pos-cart-empty"><i class="fa-solid fa-cart-shopping"></i>El carrito está vacío</div>';
       this.updateTotal();
       return;
     }
@@ -177,33 +227,31 @@ class POS {
     container.innerHTML = this.cart.map((item, index) => {
       const imageSrc = getProductImage(item, this.categories);
       return `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-3);border-bottom:1px solid var(--color-border-light);">
-          <div style="display:flex;align-items:center;gap:var(--space-3);flex:1;">
-            <div style="width:40px;height:40px;border-radius:var(--radius-md);overflow:hidden;flex-shrink:0;background:var(--color-gray-100);">
-              <img src="${imageSrc}" alt="${item.name}" style="width:100%;height:100%;object-fit:cover;" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">
-            </div>
-            <div>
-              <div style="font-weight:var(--font-medium);font-size:var(--text-sm);">${item.name}</div>
-              <div style="color:var(--color-text-secondary);font-size:var(--text-xs);">${format(item.price)} x ${item.quantity}</div>
-            </div>
+        <div class="pos-cart-item">
+          <div class="pos-cart-item__image">
+            <img src="${imageSrc}" alt="${item.name}" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">
           </div>
-          <div style="display:flex;align-items:center;gap:var(--space-2);">
-            <button class="btn-remove" data-index="${index}" style="width:24px;height:24px;border-radius:50%;background:var(--color-gray-100);">-</button>
-            <span style="font-weight:var(--font-semibold);">${item.quantity}</span>
-            <button class="btn-add" data-index="${index}" style="width:24px;height:24px;border-radius:50%;background:var(--color-primary-100);color:var(--color-primary);">+</button>
+          <div class="pos-cart-item__info">
+            <div class="pos-cart-item__name">${item.name}</div>
+            <div class="pos-cart-item__price">${format(item.price)} x ${item.quantity}</div>
+          </div>
+          <div class="pos-cart-item__actions">
+            <button class="pos-cart-item__btn pos-cart-item__btn--remove" data-index="${index}">&minus;</button>
+            <span class="pos-cart-item__qty">${item.quantity}</span>
+            <button class="pos-cart-item__btn pos-cart-item__btn--add" data-index="${index}">+</button>
           </div>
         </div>
       `;
     }).join('');
 
-    container.querySelectorAll('.btn-remove').forEach(btn => {
+    container.querySelectorAll('.pos-cart-item__btn--remove').forEach(btn => {
       btn.addEventListener('click', () => {
         const idx = parseInt(btn.dataset.index);
         this.removeFromCart(idx);
       });
     });
 
-    container.querySelectorAll('.btn-add').forEach(btn => {
+    container.querySelectorAll('.pos-cart-item__btn--add').forEach(btn => {
       btn.addEventListener('click', () => {
         const idx = parseInt(btn.dataset.index);
         this.cart[idx].quantity += 1;
@@ -247,11 +295,7 @@ class POS {
     if (!infoContainer) return;
 
     if (this.currentCustomer) {
-      infoContainer.innerHTML = `
-        <div style="font-size:var(--text-sm);color:var(--color-text-secondary);">
-          Saldo: <strong>${format(this.currentCustomer.balance || 0)}</strong>
-        </div>
-      `;
+      infoContainer.innerHTML = `Saldo: <strong>${format(this.currentCustomer.balance || 0)}</strong>`;
     } else {
       infoContainer.innerHTML = '';
     }
@@ -262,24 +306,21 @@ class POS {
     const discountAmount = this.discountType === 'percent'
       ? subtotal * (this.discount / 100)
       : this.discount;
-    const tax = (subtotal - discountAmount) * (this.taxRate / 100);
-    const total = subtotal - discountAmount + tax;
+    const total = subtotal - discountAmount;
 
     const subtotalEl = document.getElementById('cart-subtotal');
     const discountEl = document.getElementById('cart-discount');
-    const taxEl = document.getElementById('cart-tax');
     const totalEl = document.getElementById('cart-total');
-    const changeEl = document.getElementById('cart-change');
 
     if (subtotalEl) subtotalEl.textContent = `$${subtotal.toFixed(2)}`;
     if (discountEl) discountEl.textContent = `-$${discountAmount.toFixed(2)}`;
-    if (taxEl) taxEl.textContent = `$${tax.toFixed(2)}`;
     if (totalEl) totalEl.textContent = `$${total.toFixed(2)}`;
 
-    if (this.paymentMethod === 'cash' && this.cashReceived > 0) {
-      const change = this.cashReceived - total;
-      if (changeEl) changeEl.textContent = `$${Math.max(0, change).toFixed(2)}`;
+    if (this.payments.length === 1) {
+      this.payments[0].amount = total;
     }
+
+    this._updatePaymentSummary();
   }
 
   setDiscount(type, value) {
@@ -288,18 +329,242 @@ class POS {
     this.updateTotal();
   }
 
-  setPaymentMethod(method) {
-    this.paymentMethod = method;
-    const cashSection = document.getElementById('cash-payment-section');
-    if (cashSection) {
-      cashSection.style.display = method === 'cash' ? 'block' : 'none';
+  _getTotal() {
+    const subtotal = this.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const discountAmount = this.discountType === 'percent'
+      ? subtotal * (this.discount / 100)
+      : this.discount;
+    return subtotal - discountAmount;
+  }
+
+  _renderPaymentUI() {
+    const container = document.querySelector('.pos-cart-footer');
+    if (!container) return;
+
+    const existing = document.getElementById('pos-multi-payment');
+    if (existing) existing.remove();
+
+    const wrapper = document.createElement('div');
+    wrapper.id = 'pos-multi-payment';
+
+    const total = this._getTotal();
+
+    if (this.payments.length === 1) {
+      this.payments[0].amount = total;
     }
-    this.updateTotal();
+
+    const paid = this.payments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+    const remaining = Math.max(0, total - paid);
+
+    wrapper.innerHTML = `
+      <div id="payment-status-bar">
+        <div class="payment-status">
+          <span class="payment-status__label">Total a cobrar:</span>
+          <span class="payment-status__value" id="payment-total-display">${format(total)}</span>
+        </div>
+        <div class="payment-status">
+          <span class="payment-status__label">Ingresado:</span>
+          <span class="payment-status__value" id="payment-paid-display">${format(paid)}</span>
+        </div>
+        <div class="payment-status">
+          <span class="payment-status__label">Restante:</span>
+          <span class="payment-status__remaining ${remaining <= 0.01 ? 'paid' : ''}" id="payment-remaining-display">${format(remaining)}</span>
+        </div>
+        ${remaining > 0.01 ? `<div class="payment-progress"><div class="payment-progress__bar" style="width:${total > 0 ? Math.min(100, (paid / total) * 100) : 0}%;background:var(--color-primary);"></div></div>` : ''}
+        <div class="payment-divider"></div>
+      </div>
+      <div id="payment-rows">
+        ${this._renderPaymentRows()}
+      </div>
+      <div class="payment-btn-group">
+        <button class="btn btn-ghost btn-sm payment-add-btn" id="add-payment-btn">
+          <i class="fa-solid fa-plus"></i> Agregar método
+        </button>
+        <button class="btn btn-ghost btn-sm" id="reset-payments-btn">
+          <i class="fa-solid fa-rotate-left"></i>
+        </button>
+      </div>
+    `;
+
+    const confirmBtn = document.getElementById('confirm-sale-btn');
+    container.insertBefore(wrapper, confirmBtn);
+
+    document.getElementById('add-payment-btn').onclick = () => {
+      this.payments.push({ method: 'cash', amount: 0 });
+      this._updatePaymentUI();
+    };
+
+    document.getElementById('reset-payments-btn').onclick = () => {
+      this.payments = [{ method: 'cash', amount: 0 }];
+      this._updatePaymentUI();
+    };
+
+    this._attachPaymentRowEvents();
+    this._updatePaymentUI();
+  }
+
+  _renderPaymentRows() {
+    return this.payments.map((p, i) => {
+      const paid = this.payments.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0);
+      const total = this._getTotal();
+      const isCash = p.method === 'cash';
+      const allCash = this.payments.every(x => x.method === 'cash');
+      const cashIdx = this.payments.findIndex(x => x.method === 'cash');
+      const showReceived = isCash && (allCash || (cashIdx === i));
+      const changeVal = Math.max(0, (parseFloat(p._received) || 0) - (parseFloat(p.amount) || 0));
+
+      return `
+        <div class="payment-row" data-index="${i}">
+          <select class="payment-row__method" data-index="${i}">
+            ${PAYMENT_METHODS.map(m => `<option value="${m.id}" ${m.id === p.method ? 'selected' : ''}>${m.label}</option>`).join('')}
+          </select>
+          <div class="payment-row__amount-wrap">
+            <input type="number" class="payment-row__amount" data-index="${i}" value="${p.amount || ''}" min="0" step="0.01" placeholder="0.00">
+            ${showReceived ? `
+              <input type="number" class="payment-row__received" data-index="${i}" value="${p._received || ''}" placeholder="Recibido" min="0" step="0.01">
+              <span class="payment-row__change ${changeVal > 0 ? 'has-change' : ''}" data-index="${i}">${format(changeVal)}</span>
+            ` : ''}
+          </div>
+          ${this.payments.length > 1 ? `<button class="payment-row__remove" data-index="${i}"><i class="fa-solid fa-xmark"></i></button>` : ''}
+        </div>
+      `;
+    }).join('');
+  }
+
+  _attachPaymentRowEvents() {
+    document.querySelectorAll('.payment-row__method').forEach(sel => {
+      sel.onchange = (e) => {
+        const idx = parseInt(e.target.dataset.index);
+        this.payments[idx].method = e.target.value;
+        this._updatePaymentUI();
+      };
+    });
+
+    document.querySelectorAll('.payment-row__amount').forEach(inp => {
+      inp.oninput = (e) => {
+        const idx = parseInt(e.target.dataset.index);
+        this.payments[idx].amount = parseFloat(e.target.value) || 0;
+        this._updatePaymentSummary();
+        this._updateChange(idx);
+      };
+      inp.onfocus = (e) => e.target.select();
+    });
+
+    document.querySelectorAll('.payment-row__received').forEach(inp => {
+      inp.oninput = (e) => {
+        const idx = parseInt(e.target.dataset.index);
+        this.payments[idx]._received = parseFloat(e.target.value) || 0;
+        this._updateChange(idx);
+        this._updatePaymentSummary();
+      };
+      inp.onfocus = (e) => e.target.select();
+    });
+
+    document.querySelectorAll('.payment-row__remove').forEach(btn => {
+      btn.onclick = (e) => {
+        const idx = parseInt(e.target.dataset.index);
+        this.payments.splice(idx, 1);
+        this._updatePaymentUI();
+      };
+    });
+  }
+
+  _updatePaymentSummary() {
+    const total = this._getTotal();
+    const paid = this.payments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+    const remaining = Math.max(0, total - paid);
+
+    const totalEl = document.getElementById('payment-total-display');
+    const paidEl = document.getElementById('payment-paid-display');
+    const remainEl = document.getElementById('payment-remaining-display');
+
+    if (totalEl) totalEl.textContent = format(total);
+    if (paidEl) paidEl.textContent = format(paid);
+    if (remainEl) {
+      remainEl.textContent = format(remaining);
+      remainEl.className = 'payment-status__remaining' + (remaining <= 0.01 ? ' paid' : '');
+    }
+
+    const progressBar = document.querySelector('#payment-status-bar .payment-progress');
+    if (progressBar && total > 0) {
+      const pct = Math.min(100, (paid / total) * 100);
+      const bar = progressBar.querySelector('.payment-progress__bar');
+      if (bar) bar.style.width = pct + '%';
+    }
+
+    const confirmBtn = document.getElementById('confirm-sale-btn');
+    if (confirmBtn) {
+      const diff = Math.abs(paid - total);
+      if (diff <= 0.01 && total > 0) {
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = '<i class="fa-solid fa-check"></i> Confirmar Venta';
+        confirmBtn.onclick = () => this.confirmSale();
+      } else {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = `Falta ${format(remaining)}`;
+      }
+    }
+  }
+
+  _updatePaymentUI() {
+    const wrapper = document.getElementById('pos-multi-payment');
+    if (!wrapper) return;
+
+    const total = this._getTotal();
+    const paid = this.payments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+    const remaining = Math.max(0, total - paid);
+
+    const totalEl = document.getElementById('payment-total-display');
+    const paidEl = document.getElementById('payment-paid-display');
+    const remainEl = document.getElementById('payment-remaining-display');
+
+    if (totalEl) totalEl.textContent = format(total);
+    if (paidEl) paidEl.textContent = format(paid);
+    if (remainEl) {
+      remainEl.textContent = format(remaining);
+      remainEl.className = 'payment-status__remaining' + (remaining <= 0.01 ? ' paid' : '');
+    }
+
+    const rows = document.getElementById('payment-rows');
+    if (rows) {
+      rows.innerHTML = this._renderPaymentRows();
+      this._attachPaymentRowEvents();
+    }
+
+    const confirmBtn = document.getElementById('confirm-sale-btn');
+    if (confirmBtn) {
+      const diff = Math.abs(paid - total);
+      if (diff <= 0.01 && total > 0) {
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = '<i class="fa-solid fa-check"></i> Confirmar Venta';
+        confirmBtn.onclick = () => this.confirmSale();
+      } else {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = `Falta ${format(remaining)}`;
+      }
+    }
+  }
+
+  _updateChange(idx) {
+    const receivedEl = document.querySelector(`.payment-row__received[data-index="${idx}"]`);
+    const changeEl = document.querySelector(`.payment-row__change[data-index="${idx}"]`);
+    if (!receivedEl || !changeEl) return;
+    const amount = parseFloat(this.payments[idx]?.amount) || 0;
+    const received = parseFloat(receivedEl.value) || 0;
+    const change = Math.max(0, received - amount);
+    changeEl.textContent = format(change);
+    changeEl.className = 'payment-row__change' + (change > 0 ? ' has-change' : '');
   }
 
   async confirmSale() {
+    if (this._isProcessing) return;
     if (this.cart.length === 0) {
       Toast.error('Error', 'El carrito está vacío');
+      return;
+    }
+
+    if (!cashService.currentSession) {
+      Toast.error('Error', 'No hay una sesión de caja abierta');
       return;
     }
 
@@ -307,32 +572,43 @@ class POS {
     const discountAmount = this.discountType === 'percent'
       ? subtotal * (this.discount / 100)
       : this.discount;
-    const tax = (subtotal - discountAmount) * (this.taxRate / 100);
-    const total = subtotal - discountAmount + tax;
+    const total = subtotal - discountAmount;
 
-    if (this.paymentMethod === 'account') {
+    const validation = validatePayments(this.payments, total);
+    if (!validation.valid) {
+      Toast.error('Error', validation.error);
+      return;
+    }
+
+    const accountPayment = this.payments.find(p => p.method === 'account');
+    if (accountPayment && accountPayment.amount > 0) {
       if (!this.currentCustomer) {
         Toast.error('Error', 'Seleccioná un cliente para usar cuenta corriente');
         return;
       }
       const balance = this.currentCustomer.balance || 0;
-      if (balance < total) {
+      if (balance < accountPayment.amount) {
         Toast.error('Error', 'Saldo insuficiente en la cuenta corriente');
         return;
       }
     }
 
-    if (this.paymentMethod === 'cash') {
-      this.cashReceived = parseFloat(document.getElementById('cash-received')?.value) || 0;
-      if (this.cashReceived < total) {
-        Toast.error('Error', 'El monto recibido es insuficiente');
-        return;
-      }
+    const primaryMethod = this.payments[0]?.method || 'cash';
+    const cashPayment = this.payments.find(p => p.method === 'cash');
+    const cashReceived = cashPayment ? (parseFloat(cashPayment._received) || cashPayment.amount) : 0;
+    const change = cashPayment ? Math.max(0, cashReceived - cashPayment.amount) : 0;
+
+    this._isProcessing = true;
+    const confirmBtn = document.getElementById('confirm-sale-btn');
+    if (confirmBtn) {
+      confirmBtn.disabled = true;
+      confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Procesando...';
     }
 
     const sale = {
       id: `sale_${Date.now()}`,
       date: new Date().toISOString(),
+      sessionId: cashService.currentSession?.id,
       customerId: this.currentCustomer ? this.currentCustomer.id : null,
       items: this.cart.map(item => ({
         productId: item.id,
@@ -343,11 +619,16 @@ class POS {
       })),
       subtotal,
       discount: discountAmount,
-      tax,
+      tax: 0,
       total,
-      paymentMethod: this.paymentMethod,
-      cashReceived: this.paymentMethod === 'cash' ? this.cashReceived : null,
-      change: this.paymentMethod === 'cash' ? Math.max(0, this.cashReceived - total) : null,
+      paymentMethod: primaryMethod,
+      paymentType: this.payments.length > 1 ? 'COMBINADO' : 'SIMPLE',
+      payments: this.payments.map(p => ({
+        method: p.method,
+        amount: parseFloat(p.amount) || 0
+      })),
+      cashReceived: cashPayment ? cashReceived : null,
+      change: cashPayment ? change : null,
       userId: state.get('currentUser')?.id
     };
 
@@ -371,111 +652,200 @@ class POS {
         }
       }
 
-      if (this.paymentMethod === 'account' && this.currentCustomer) {
-        this.currentCustomer.balance = (this.currentCustomer.balance || 0) - total;
+      const accountPayment = this.payments.find(p => p.method === 'account');
+      if (accountPayment && accountPayment.amount > 0 && this.currentCustomer) {
+        this.currentCustomer.balance = (this.currentCustomer.balance || 0) - accountPayment.amount;
         await customerRepo.update(this.currentCustomer);
       }
+
+      await cashService.recordSale(sale);
 
       Toast.success('Éxito', `Venta #${sale.id.substring(0, 8)} confirmada`);
       this.showTicket(sale);
       this.cart = [];
       this.currentCustomer = null;
       this.discount = 0;
-      this.cashReceived = 0;
+      this.payments = [{ method: 'cash', amount: 0 }];
       this.renderCart();
       this.renderCustomerSelect();
     } catch (error) {
       console.error('Error saving sale:', error);
       Toast.error('Error', 'No se pudo guardar la venta');
+    } finally {
+      this._isProcessing = false;
+      if (confirmBtn) {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Confirmar Venta';
+      }
     }
   }
 
-  async showTicket(sale) {
+  showTicket(sale) {
     const settings = state.get('settings');
-    const businessName = settings?.businessName || 'Mi Negocio';
-    const taxRate = settings?.taxRate || '21';
-    const ticketFooter = settings?.ticketFooter || 'Gracias por su compra!';
+    const body = renderTicketBody(sale, settings);
+    showTicketModal('Ticket de Venta', body);
+  }
 
-    let itemsHtml = '';
-    if (sale.items && Array.isArray(sale.items)) {
-      sale.items.forEach(item => {
-        itemsHtml += `
-          <div style="display:flex;justify-content:space-between;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border-light);font-size:var(--text-sm);">
-            <span>${item.quantity}x ${item.name}</span>
-            <span style="font-weight:var(--font-medium);">${format(item.subtotal || (item.price * item.quantity))}</span>
-          </div>
-        `;
-      });
+  _injectCashButton() {
+    const header = document.querySelector('.pos-cart-header');
+    if (!header) return;
+    const existing = document.getElementById('pos-cash-btn');
+    if (existing) existing.remove();
+
+    const btn = document.createElement('button');
+    btn.id = 'pos-cash-btn';
+    btn.className = 'pos-cash-btn';
+    btn.innerHTML = '<i class="fa-solid fa-cash-register"></i>';
+    btn.title = 'Gestión de Caja';
+    btn.setAttribute('aria-label', 'Gestión de Caja');
+    header.appendChild(btn);
+
+    btn.onclick = () => this.showCashModal();
+  }
+
+  showCashModal() {
+    if (!cashService.currentSession) {
+      Toast.error('Error', 'No hay sesión de caja abierta');
+      return;
     }
 
     const body = `
-      <div style="font-family:monospace;max-width:300px;margin:0 auto;padding:20px;background:white;">
-        <div style="text-align:center;margin-bottom:20px;">
-          <div style="font-size:18px;font-weight:bold;">${businessName}</div>
-          <div style="font-size:12px;color:#666;">Ticket #${sale.id.substring(0, 8)}</div>
-          <div style="font-size:12px;color:#666;">${new Date(sale.date).toLocaleString('es-AR')}</div>
-        </div>
-        <div style="border-top:1px dashed #ccc;padding-top:10px;margin-bottom:10px;">
-          ${itemsHtml || '<p style="color:var(--color-text-secondary);font-size:var(--text-sm);">No hay detalles de items.</p>'}
-        </div>
-
-        <div style="border-top:1px solid var(--color-border);padding-top:var(--space-3);">
-          <div style="display:flex;justify-content:space-between;margin-bottom:var(--space-2);font-size:var(--text-sm);">
-            <span>Subtotal:</span>
-            <span>$${sale.subtotal.toFixed(2)}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:var(--space-2);font-size:var(--text-sm);">
-            <span>Descuento:</span>
-            <span>-$${sale.discount.toFixed(2)}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:var(--space-2);font-size:var(--text-sm);">
-            <span>Impuestos (${taxRate}%):</span>
-            <span>$${sale.tax.toFixed(2)}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:var(--text-lg);border-top:1px solid var(--color-border);padding-top:var(--space-2);margin-top:var(--space-2);">
-            <span>TOTAL:</span>
-            <span>$${sale.total.toFixed(2)}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;margin-top:4px;">
-            <span>Método:</span>
-            <span>${this.getPaymentMethodLabel(sale.paymentMethod)}</span>
-          </div>
-          ${sale.cashReceived ? `<div style="display:flex;justify-content:space-between;"><span>Recibido:</span><span>$${sale.cashReceived.toFixed(2)}</span></div>` : ''}
-          ${sale.change ? `<div style="display:flex;justify-content:space-between;"><span>Cambio:</span><span>$${sale.change.toFixed(2)}</span></div>` : ''}
-        </div>
-        <div style="text-align:center;margin-top:20px;font-size:12px;color:#666;">
-          ${ticketFooter}
-        </div>
+      <div style="margin-bottom:var(--space-4);">
+        <label class="form-label">Tipo de operación</label>
+        <select class="form-input" id="cash-op-type">
+          <option value="in">Ingreso Manual</option>
+          <option value="out">Egreso Manual</option>
+          <option value="close">Cierre de Caja</option>
+        </select>
       </div>
-      <div style="text-align:center;margin-top:20px;">
-        <button class="btn btn-primary" onclick="window.print()"><i class="fa-solid fa-print"></i> Imprimir</button>
-        <button class="btn btn-secondary" id="ticket-close-btn">Cerrar</button>
+      <div id="cash-op-dynamic">
+        <div class="form-group">
+          <label class="form-label">Monto</label>
+          <input type="number" class="form-input" id="cash-op-amount" min="0" step="0.01" placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Observación <span style="color:var(--color-text-muted);font-weight:var(--font-normal);">(opcional)</span></label>
+          <input type="text" class="form-input" id="cash-op-obs" placeholder="Motivo del movimiento">
+        </div>
       </div>
     `;
 
-    const modalModule = await import('../../components/modal.js');
-    const Modal = modalModule.default;
+    const footer = `
+      <button class="btn btn-secondary" id="cash-modal-close-btn">Cerrar</button>
+      <button class="btn btn-primary" id="cash-modal-exec-btn">Ejecutar</button>
+    `;
+
     Modal.show({
-      title: 'Ticket de Venta',
+      title: 'Gestión de Caja',
       body,
-      footer: ''
+      footer
     });
 
-    requestAnimationFrame(() => {
-      const closeBtn = document.getElementById('ticket-close-btn');
-      if (closeBtn) closeBtn.addEventListener('click', () => Modal.close());
-    });
+    document.getElementById('cash-modal-close-btn').onclick = () => Modal.close();
+
+    document.getElementById('cash-op-type').onchange = (e) => {
+      const dynamic = document.getElementById('cash-op-dynamic');
+      if (e.target.value === 'close') {
+        dynamic.innerHTML = '<div style="text-align:center;padding:var(--space-4);"><i class="fa-solid fa-spinner fa-spin" style="font-size:24px;"></i><p style="margin-top:var(--space-2);">Cargando resumen...</p></div>';
+        this._loadCloseSummary();
+      } else {
+        dynamic.innerHTML = `
+          <div class="form-group">
+            <label class="form-label">Monto</label>
+            <input type="number" class="form-input" id="cash-op-amount" min="0" step="0.01" placeholder="0.00">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Observación <span style="color:var(--color-text-muted);font-weight:var(--font-normal);">(opcional)</span></label>
+            <input type="text" class="form-input" id="cash-op-obs" placeholder="Motivo del movimiento">
+          </div>
+        `;
+      }
+    };
+
+    document.getElementById('cash-modal-exec-btn').onclick = async () => {
+      const type = document.getElementById('cash-op-type')?.value;
+      if (type === 'close') {
+        await this._executeClose();
+        return;
+      }
+      const amount = document.getElementById('cash-op-amount')?.value;
+      const obs = document.getElementById('cash-op-obs')?.value || '';
+      if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+        Toast.error('Error', 'Ingresá un monto válido');
+        return;
+      }
+      try {
+        await cashService.addMovement(type, amount, obs);
+        const label = type === 'in' ? 'Ingreso' : 'Egreso';
+        Toast.success('Éxito', `${label} registrado correctamente`);
+        Modal.close();
+      } catch (err) {
+        Toast.error('Error', err.message);
+      }
+    };
   }
 
-  getPaymentMethodLabel(method) {
-    const labels = {
-      'cash': 'Efectivo',
-      'debit': 'Débito',
-      'transfer': 'Transferencia',
-      'account': 'Cuenta Corriente',
-      'mixed': 'Mixto'
-    };
-    return labels[method] || method;
+  async _loadCloseSummary() {
+    const summary = await cashService.getSessionSummary();
+    if (!summary) {
+      document.getElementById('cash-op-dynamic').innerHTML = '<p style="color:var(--color-danger);">Error al cargar resumen</p>';
+      return;
+    }
+
+    const dynamic = document.getElementById('cash-op-dynamic');
+    const s = summary;
+    dynamic.innerHTML = `
+      <div class="cash-summary">
+        <div class="cash-summary__header">
+          <div><span class="cash-summary__label">Apertura</span><span class="cash-summary__value">${new Date(s.session.openedAt).toLocaleString('es-AR')}</span></div>
+          <div><span class="cash-summary__label">Responsable</span><span class="cash-summary__value">${s.session.userName || 'N/A'}</span></div>
+        </div>
+        <div class="cash-summary__divider"></div>
+        <div class="cash-summary__row"><span>Monto Inicial</span><span>${format(s.initialAmount)}</span></div>
+        <div class="cash-summary__row"><span>Ingresos Manuales</span><span style="color:var(--color-success);">+${format(s.manualIn)}</span></div>
+        <div class="cash-summary__row"><span>Egresos Manuales</span><span style="color:var(--color-danger);">-${format(s.manualOut)}</span></div>
+        <div class="cash-summary__divider"></div>
+        <div class="cash-summary__row"><span>Ventas Efectivo</span><span>${format(s.cashSales)}</span></div>
+        <div class="cash-summary__row"><span>Ventas Transferencia</span><span>${format(s.transferSales)}</span></div>
+        <div class="cash-summary__row"><span>Ventas Débito</span><span>${format(s.debitSales)}</span></div>
+        <div class="cash-summary__row"><span>Ventas Cuenta Corriente</span><span>${format(s.accountSales)}</span></div>
+        <div class="cash-summary__row cash-summary__total"><span>Total Ventas</span><span>${format(s.totalSales)}</span></div>
+        <div class="cash-summary__divider"></div>
+        <div class="cash-summary__row cash-summary__expected"><span>Total Esperado en Efectivo</span><span>${format(s.expectedTotal)}</span></div>
+        <div style="margin-top:var(--space-4);">
+          <label class="form-label">Monto Real Contado</label>
+          <input type="number" class="form-input form-input-lg" id="close-final-amount" min="0" step="0.01" placeholder="0.00" style="font-size:var(--text-lg);font-weight:var(--font-bold);">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Observación <span style="color:var(--color-text-muted);font-weight:var(--font-normal);">(opcional)</span></label>
+          <input type="text" class="form-input" id="close-observation" placeholder="Motivo del cierre">
+        </div>
+      </div>
+    `;
+  }
+
+  async _executeClose() {
+    const finalAmount = document.getElementById('close-final-amount')?.value;
+    const observation = document.getElementById('close-observation')?.value || '';
+    if (!finalAmount || isNaN(parseFloat(finalAmount)) || parseFloat(finalAmount) < 0) {
+      Toast.error('Error', 'Ingresá un monto final válido');
+      return;
+    }
+    try {
+      await cashService.closeSession(finalAmount, observation);
+      const expected = parseFloat(document.querySelector('.cash-summary__expected span:last-child')?.textContent?.replace(/[^\d.-]/g, '') || '0');
+      const diff = parseFloat(finalAmount) - expected;
+      const absDiff = Math.abs(diff);
+      if (absDiff > 0.01) {
+        Toast.warning('Caja Cerrada', `Diferencia: ${format(diff)}`);
+      } else {
+        Toast.success('Caja Cerrada', 'Cierre exitoso. Diferencia: $0.00');
+      }
+      Modal.close();
+      setTimeout(() => cashService.requireActiveSession(), 800);
+    } catch (err) {
+      Toast.error('Error', err.message);
+    }
   }
 }
 

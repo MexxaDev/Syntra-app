@@ -165,10 +165,25 @@ function initApp() {
   }
 }
 
+let _previousSidebarMode = null;
+
 async function loadModule(route) {
   try {
+    const app = document.getElementById('app');
+
+    if (route !== 'pos' && _previousSidebarMode !== null) {
+      const prevMode = _previousSidebarMode;
+      _previousSidebarMode = null;
+      app?.classList.remove('sidebar-collapsed', 'sidebar-hidden');
+      if (prevMode === 'collapsed' || prevMode === 'hover') {
+        app?.classList.add('sidebar-collapsed');
+      }
+      state.set('sidebarMode', prevMode);
+    }
+
     switch (route) {
       case 'pos':
+        _previousSidebarMode = state.get('sidebarMode') || 'expanded';
         await POS.loadProducts();
         const confirmBtn = document.getElementById('confirm-sale-btn');
         if (confirmBtn) {
@@ -191,15 +206,6 @@ async function loadModule(route) {
             }, 300);
           };
         }
-        document.querySelectorAll('.payment-btn').forEach(btn => {
-          btn.onclick = () => {
-            document.querySelectorAll('.payment-btn').forEach(b => {
-              b.className = 'btn btn-sm btn-secondary payment-btn';
-            });
-            btn.className = 'btn btn-sm btn-primary payment-btn';
-            POS.setPaymentMethod(btn.dataset.method);
-          };
-        });
         setTimeout(() => {
           const barcodeInput = document.getElementById('pos-barcode-input');
           if (barcodeInput) {
@@ -207,7 +213,6 @@ async function loadModule(route) {
           }
         }, 100);
 
-        const app = document.getElementById('app');
         if (app) {
           app.classList.add('sidebar-collapsed');
           app.classList.remove('sidebar-hidden');
@@ -288,7 +293,6 @@ async function loadSettings() {
     { key: 'businessName', value: 'Mi Negocio' },
     { key: 'currency', value: 'ARS' },
     { key: 'currencySymbol', value: '$' },
-    { key: 'taxRate', value: '21' },
     { key: 'ticketFooter', value: 'Gracias por su compra!' },
     { key: 'logo', value: '' }
   ];
@@ -312,7 +316,7 @@ async function loadSettings() {
     state.set('settings', settingsObj);
   } catch (error) {
     console.error('Error loading settings:', error);
-    state.set('settings', { currencySymbol: '$', taxRate: '21' });
+    state.set('settings', { currencySymbol: '$' });
   }
 }
 

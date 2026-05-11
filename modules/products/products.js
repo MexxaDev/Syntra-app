@@ -18,9 +18,16 @@ class Products {
     if (container) {
       container.innerHTML = '<div style="text-align:center;padding:var(--space-8);color:var(--color-text-secondary);"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;margin-bottom:var(--space-3);display:block;"></i>Cargando productos...</div>';
     }
-    this.products = await productRepo.findAll();
-    this.categories = await categoryRepo.findAll();
-    this.render();
+    try {
+      this.products = await productRepo.findAll();
+      this.categories = await categoryRepo.findAll();
+      this.render();
+    } catch (err) {
+      console.error('Error loading products:', err);
+      if (container) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-state__icon"><i class="fa-solid fa-triangle-exclamation"></i></div><h3 class="empty-state__title">Error al cargar</h3><p class="empty-state__description">No se pudieron cargar los productos. <button class="btn btn-sm btn-primary" onclick="document.querySelector(\'[data-module=\"products\"]\')?.click()">Reintentar</button></p></div>';
+      }
+    }
   }
 
   search(query) {
@@ -240,8 +247,8 @@ class Products {
         </div>
         <div class="form-group">
           <label class="form-label">Imagen</label>
-        <input type="file" class="form-input" id="prod-image" accept="image/*" style="padding:var(--space-2);">
-        ${product && product.image ? `<div style="margin-top:var(--space-2);"><img src="${product.image}" style="width:80px;height:80px;object-fit:cover;border-radius:var(--radius-md);"></div>` : ''}
+        <input type="file" id="prod-image" accept="image/*" style="padding:var(--space-2);font-size:var(--text-sm);">
+        ${product && product.image ? `<div style="margin-top:var(--space-2);"><img src="${product.image}" alt="${product.name}" class="product-preview-img"></div>` : ''}
       </div>
     `;
 

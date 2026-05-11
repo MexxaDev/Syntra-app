@@ -41,75 +41,58 @@
 
       <!-- POS -->
       <section id="pos" class="content-section">
-        <div class="page-header">
-          <h1 class="page-header__title">Punto de Venta</h1>
-          <p class="page-header__subtitle">Realiza ventas rapidas</p>
-        </div>
+        <!-- page-header hidden for cleaner POS layout -->
         <div class="pos-layout">
           <div class="pos-products">
-            <div class="products-search" style="margin-bottom:var(--space-4);display:flex;gap:var(--space-2);">
+            <div class="pos-search-bar">
               <input type="text" class="form-input" placeholder="Buscar productos..." id="pos-search-input">
-              <input type="text" class="form-input" placeholder="Escanear código..." id="pos-barcode-input" style="max-width:200px;" autofocus>
+              <input type="text" class="form-input" placeholder="Escanear código..." id="pos-barcode-input" autofocus>
             </div>
             <div class="pos-product-grid" id="pos-product-list">
-              <p style="color:var(--color-text-secondary);">Cargando productos...</p>
+              <p class="pos-cart-empty" style="padding:var(--space-4);">Cargando productos...</p>
             </div>
           </div>
           <div class="pos-cart">
-            <div class="pos-cart-header">Carrito de Venta</div>
-            <div id="customer-section" style="padding:var(--space-3);border-bottom:1px solid var(--color-border-light);">
-              <div style="display:flex;gap:var(--space-3);align-items:center;">
-                <select id="pos-customer-select" style="flex:1;padding:var(--space-2);border:1px solid var(--color-border);border-radius:var(--radius-md);font-size:var(--text-sm);">
+            <div class="pos-cart-header">
+              <span class="pos-cart-title">Carrito de Venta</span>
+              <span class="pos-cart-count" id="cart-count"></span>
+            </div>
+            <div id="customer-section">
+              <div class="pos-customer-row">
+                <select id="pos-customer-select">
                   <option value="">Consumidor Final</option>
                 </select>
               </div>
-              <div id="customer-info" style="margin-top:var(--space-2);"></div>
+              <div id="customer-info"></div>
             </div>
             <div class="pos-cart-items" id="cart-items">
-              <p style="text-align:center;color:var(--color-text-secondary);padding:var(--space-8);">El carrito esta vacio</p>
+              <div class="pos-cart-empty">
+                <i class="fa-solid fa-cart-shopping"></i>
+                El carrito esta vacio
+              </div>
             </div>
             <div class="pos-cart-footer">
-              <div style="display:flex;justify-content:space-between;margin-bottom:var(--space-2);">
+              <div class="pos-total-row">
                 <span>Subtotal:</span>
-                <span id="cart-subtotal" style="font-weight:var(--font-semibold);">$0.00</span>
+                <span class="pos-total-value" id="cart-subtotal">$0.00</span>
               </div>
-              <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-2);align-items:center;">
-                <span style="font-size:var(--text-sm);">Descuento:</span>
-                <select id="discount-type" style="padding:var(--space-1);font-size:var(--text-xs);border:1px solid var(--color-border);border-radius:var(--radius-sm);">
+              <div class="pos-discount-row">
+                <span class="pos-discount-label">Descuento:</span>
+                <select id="discount-type">
                   <option value="percent">%</option>
                   <option value="fixed">$</option>
                 </select>
-                <input type="number" id="discount-value" placeholder="0" min="0" step="0.01" style="width:80px;padding:var(--space-1);font-size:var(--text-sm);border:1px solid var(--color-border);border-radius:var(--radius-sm);">
-                <span id="cart-discount" style="font-size:var(--text-sm);font-weight:var(--font-semibold);">-$0.00</span>
+                <input type="number" id="discount-value" placeholder="0" min="0" step="0.01">
+                <span class="pos-discount-amount" id="cart-discount">-$0.00</span>
               </div>
-              <div style="display:flex;justify-content:space-between;margin-bottom:var(--space-2);">
-                <span>Impuestos:</span>
-                <span id="cart-tax" style="font-weight:var(--font-semibold);">$0.00</span>
-              </div>
-              <div style="display:flex;justify-content:space-between;margin-bottom:var(--space-3);font-size:var(--text-lg);">
+              <div class="pos-total-row pos-total-row--final">
                 <span>Total:</span>
-                <span id="cart-total" style="font-weight:var(--font-bold);color:var(--color-primary);">$0.00</span>
+                <span class="pos-total-value" id="cart-total">$0.00</span>
               </div>
 
-              <div style="margin-bottom:var(--space-3);">
-                <div style="font-size:var(--text-sm);color:var(--color-text-secondary);margin-bottom:var(--space-2);">Metodo de Pago:</div>
-                <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;">
-                  <button class="btn btn-sm btn-primary payment-btn" data-method="cash">Efectivo</button>
-                  <button class="btn btn-sm btn-secondary payment-btn" data-method="debit">Debito</button>
-                  <button class="btn btn-sm btn-secondary payment-btn" data-method="transfer">Transferencia</button>
-                  <button class="btn btn-sm btn-secondary payment-btn" data-method="account">Cuenta Corriente</button>
-                </div>
-              </div>
+              <div id="payment-ui-container"></div>
 
-              <div id="cash-payment-section" style="display:none;margin-bottom:var(--space-3);">
-                <div style="display:flex;gap:var(--space-2);align-items:center;">
-                  <span style="font-size:var(--text-sm);">Recibido:</span>
-                  <input type="number" id="cash-received" placeholder="0.00" min="0" step="0.01" style="flex:1;padding:var(--space-2);font-size:var(--text-sm);border:1px solid var(--color-border);border-radius:var(--radius-md);">
-                  <span style="font-size:var(--text-sm);">Cambio: <strong id="cart-change">$0.00</strong></span>
-                </div>
-              </div>
-
-              <button class="btn btn-primary btn-block btn-lg" id="confirm-sale-btn">Confirmar Venta</button>
+              <button class="pos-confirm-btn" id="confirm-sale-btn">Confirmar Venta</button>
             </div>
           </div>
         </div>

@@ -30,7 +30,6 @@ class Settings {
 
     const currency = this.settings.currency || 'ARS';
     const currencySymbol = this.settings.currencySymbol || '$';
-    const taxRate = this.settings.taxRate || '21';
     const businessName = this.settings.businessName || '';
     const ticketFooter = this.settings.ticketFooter || '';
 
@@ -72,10 +71,6 @@ class Settings {
           <div class="form-group">
             <label class="form-label">Símbolo de Moneda</label>
             <input type="text" class="form-input" id="setting-currencySymbol" value="${currencySymbol}" maxlength="5" style="width:80px;">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Tasa de Impuestos (%)</label>
-            <input type="number" class="form-input" id="setting-taxRate" value="${taxRate}" min="0" max="100" style="width:100px;">
           </div>
         </div>
 
@@ -331,7 +326,6 @@ class Settings {
     const businessName = document.getElementById('setting-businessName')?.value || '';
     const currency = document.getElementById('setting-currency')?.value || 'ARS';
     const currencySymbol = document.getElementById('setting-currencySymbol')?.value || '$';
-    const taxRate = document.getElementById('setting-taxRate')?.value || '21';
     const ticketFooter = document.getElementById('setting-ticketFooter')?.value || '';
 
     const shopEnabled = document.getElementById('setting-shop-enabled')?.checked || false;
@@ -356,7 +350,6 @@ class Settings {
       { key: 'businessName', value: businessName },
       { key: 'currency', value: currency },
       { key: 'currencySymbol', value: currencySymbol },
-      { key: 'taxRate', value: taxRate },
       { key: 'ticketFooter', value: ticketFooter },
       { key: 'logo', value: this.logoDataUrl },
       { key: 'shop_enabled', value: shopEnabled.toString() },
@@ -400,7 +393,6 @@ class Settings {
       { key: 'businessName', value: 'Mi Negocio' },
       { key: 'currency', value: 'ARS' },
       { key: 'currencySymbol', value: '$' },
-      { key: 'taxRate', value: '21' },
       { key: 'ticketFooter', value: 'Gracias por su compra!' },
       { key: 'logo', value: '' },
       { key: 'shop_enabled', value: 'false' },

@@ -26,6 +26,19 @@ class Header {
         </div>
       </div>
       <div class="header-right">
+        <div class="alerts-btn-wrapper">
+          <button class="alerts-btn" id="header-alerts-btn" title="Alertas">
+            <i class="fa-solid fa-bell"></i>
+            <span class="alerts-badge" id="header-alerts-badge" style="display:none"></span>
+          </button>
+          <div class="alerts-popover" id="header-alerts-popover">
+            <div class="alerts-popover__header">
+              <span class="alerts-popover__title">Notificaciones</span>
+              <span class="alerts-popover__count" id="header-alerts-count" style="display:none"></span>
+            </div>
+            <div id="header-alerts-content"></div>
+          </div>
+        </div>
         <span style="font-size:var(--text-sm);color:var(--color-text-secondary);">
           ${user ? user.name : ''} (${user ? user.role : ''})
         </span>
@@ -77,7 +90,25 @@ class Header {
       this.updateToggleIcon();
     });
 
+    this._initAlertsPopover();
     this.updateToggleIcon();
+  }
+
+  _initAlertsPopover() {
+    const btn = document.getElementById('header-alerts-btn');
+    const popover = document.getElementById('header-alerts-popover');
+    if (!btn || !popover) return;
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      popover.classList.toggle('active');
+    });
+
+    document.addEventListener('click', (e) => {
+      if (popover && !popover.contains(e.target) && e.target !== btn) {
+        popover.classList.remove('active');
+      }
+    });
   }
 
   updateToggleIcon() {

@@ -29,12 +29,17 @@
   /* Semantic Colors */
   --color-success: #10B981;
   --color-success-light: #D1FAE5;
+  --color-success-dark: #047857;
   --color-danger: #EF4444;
   --color-danger-light: #FEE2E2;
+  --color-danger-dark: #DC2626;
+  --color-danger-darker: #B91C1C;
   --color-warning: #F59E0B;
   --color-warning-light: #FEF3C7;
+  --color-warning-dark: #B45309;
   --color-info: #3B82F6;
   --color-info-light: #DBEAFE;
+  --color-info-dark: #1E40AF;
 
   /* Background & Surface */
   --color-bg: var(--color-gray-50);

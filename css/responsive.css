@@ -37,6 +37,11 @@
   .pos-layout {
     grid-template-columns: 1fr;
     height: auto;
+    gap: var(--space-4);
+  }
+
+  .pos-products {
+    min-height: calc(100vh - var(--header-height) - 140px);
   }
 
   .pos-cart {
@@ -47,6 +52,22 @@
     max-height: 50vh;
     border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
     z-index: var(--z-sticky);
+    padding: var(--space-4);
+    background: var(--color-surface);
+    border-top: 1px solid var(--color-border);
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+  }
+
+  .pos-cart-header {
+    padding-bottom: var(--space-2);
+  }
+
+  .pos-cart-items {
+    padding-right: 0;
+  }
+
+  .pos-cart-footer {
+    padding-top: var(--space-2);
   }
 
   .header-search {
@@ -124,6 +145,11 @@
 
   .pos-product-grid {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: var(--space-1-5);
+  }
+
+  .pos-cart {
+    left: 0;
   }
 
   .product-grid {
@@ -175,6 +201,17 @@
 
   .pos-cart {
     left: 0;
+    max-height: 60vh;
+    padding: var(--space-3);
+  }
+
+  .pos-product-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: var(--space-1-5);
+  }
+
+  .pos-cart-item {
+    padding: var(--space-2) var(--space-2-5);
   }
 }
 
@@ -185,17 +222,67 @@
   }
 
   .pos-layout {
-    grid-template-columns: 1fr 480px;
+    grid-template-columns: 1fr 440px;
+    gap: var(--space-8);
+  }
+
+  .pos-product-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   }
 }
 
 /* ===== PRINT ===== */
 @media print {
+  body * {
+    display: none !important;
+  }
+
+  .modal-backdrop.active,
+  .modal-backdrop.active * {
+    display: revert !important;
+  }
+
+  .modal-backdrop.active {
+    position: static !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    padding: 0 !important;
+    align-items: flex-start !important;
+  }
+
+  .modal-backdrop.active .modal {
+    max-width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    transform: none !important;
+    border-radius: 0 !important;
+  }
+
+  .modal-backdrop.active .modal-header,
+  .modal-backdrop.active .modal-footer,
+  .modal-backdrop.active .modal-close,
+  .modal-backdrop.active #ticket-print-btn,
+  .modal-backdrop.active #ticket-close-btn,
+  .modal-backdrop.active .btn,
   .sidebar,
   .header,
-  .btn,
   .toast-container {
     display: none !important;
+  }
+
+  .modal-backdrop.active .modal-body {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  .modal-backdrop.active .modal-body > div:first-child {
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    border: none !important;
   }
 
   .app {
