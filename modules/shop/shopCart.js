@@ -1,5 +1,7 @@
 'use strict';
 
+import { logger } from '../../utils/logger.js';
+
 class ShopCart {
   constructor() {
     this.items = [];
@@ -13,15 +15,13 @@ class ShopCart {
         const parsed = JSON.parse(saved);
         // Validate structure
         if (Array.isArray(parsed)) {
-          this.items = parsed.filter(item =>
-            item && item.id && item.name && item.price && item.quantity > 0
-          );
+          this.items = parsed.filter(item => item && item.id && item.name && item.price && item.quantity > 0);
         } else {
           this.items = [];
         }
       }
     } catch (e) {
-      console.error('Cart restore failed:', e);
+      logger.error('ShopCart', 'Cart restore failed:', e);
       this.items = [];
       localStorage.removeItem('syntra_shop_cart');
     }
@@ -89,7 +89,7 @@ class ShopCart {
   }
 
   getSubtotal() {
-    return this.items.reduce((total, item) => total + (item.price * item.quantity), 0);
+    return this.items.reduce((total, item) => total + item.price * item.quantity, 0);
   }
 
   getItemCount() {

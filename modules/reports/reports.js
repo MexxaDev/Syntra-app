@@ -1,9 +1,17 @@
 'use strict';
 
 import { saleRepo, productRepo, customerRepo, categoryRepo } from '../../db/repositories.js';
-import { getPayments, PAYMENT_COLORS } from '../../utils/payments.js';
-import { drawBarChart, drawDoughnutChart, drawPieChart } from '../../utils/charts.js';
+import { getPayments, PAYMENT_METHODS, PAYMENT_COLORS } from '../../utils/payments.js';
+import { drawBarLineChart, drawDoughnutChart, drawPieChart } from '../../utils/charts.js';
+import {
+  getSalesByPeriod,
+  getPeriodLabels,
+  getSalesByCategory,
+  renderTopProductsDetailed,
+  attachPeriodSelector
+} from '../../utils/analytics.js';
 import state from '../../js/state.js';
+import { logger } from '../../utils/logger.js';
 
 class Reports {
   constructor() {
@@ -33,14 +41,14 @@ class Reports {
         categoryRepo.findAll()
       ]);
 
-      this.sales = sales || [];
+      this.sales = (sales || []).filter(s => s.status !== 'cancelled');
       this.products = products || [];
       this.customers = customers || [];
       this.categories = categories || [];
 
       this.render();
     } catch (error) {
-      console.error('Error loading reports:', error);
+      logger.error('Reports', 'Error loading reports:', error);
       if (container) {
         container.innerHTML = `
           <div style="text-align:center;padding:var(--space-8);color:var(--color-danger);">
@@ -55,19 +63,26 @@ class Reports {
 
   render() {
     const container = document.getElementById('reports');
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     const settings = state.get('settings') || {};
-    const currencySymbol = settings.currencySymbol || '$';
+    this.currencySymbol = settings.currencySymbol || '$';
 
     container.innerHTML = `
-      <div class="page-header">
-        <h1 class="page-header__title">Reportes</h1>
-        <p class="page-header__subtitle">Análisis avanzado de ventas</p>
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <h1 class="page-header__title">Reportes</h1>
+          <p class="page-header__subtitle">Análisis avanzado de ventas</p>
+        </div>
+        <button class="btn btn-primary" id="reports-export-csv">
+          <i class="fa-solid fa-download"></i> Exportar CSV
+        </button>
       </div>
 
       <div class="kpi-grid">
-        ${this.renderSummaryCards(currencySymbol)}
+        ${this.renderSummaryCards(this.currencySymbol)}
       </div>
 
       <div class="charts-grid">
@@ -113,13 +128,18 @@ class Reports {
     requestAnimationFrame(() => {
       setTimeout(() => {
         this.initMainChart();
-        this.initCategoryChart(currencySymbol, this.categories);
-        this.initPaymentChart(currencySymbol);
-        this.renderTopProductsDetailed(currencySymbol);
+        this.initCategoryChart(this.currencySymbol, this.categories);
+        this.initPaymentChart(this.currencySymbol);
+        this.renderTopProducts();
       }, 100);
 
-      this.attachPeriodSelector();
+      attachPeriodSelector('report-period-selector', period => {
+        this.currentPeriod = parseInt(period);
+        this.initMainChart();
+      });
     });
+
+    document.getElementById('reports-export-csv')?.addEventListener('click', () => this.exportSalesCSV());
   }
 
   renderSummaryCards(currencySymbol) {
@@ -138,7 +158,7 @@ class Reports {
     const avgTicket = salesMonth.length > 0 ? totalMonth / salesMonth.length : 0;
 
     const productCounts = {};
-    this.sales.forEach(sale => {
+    salesMonth.forEach(sale => {
       if (sale.items && Array.isArray(sale.items)) {
         sale.items.forEach(item => {
           productCounts[item.productId] = (productCounts[item.productId] || 0) + (item.quantity || 0);
@@ -189,38 +209,58 @@ class Reports {
 
   initMainChart() {
     const canvas = document.getElementById('report-main-chart');
-    if (!canvas) return;
+    if (!canvas) {
+      return;
+    }
 
     const ctx = canvas.getContext('2d');
-    const data = this.getSalesByPeriod(this.currentPeriod);
-    const labels = this.getPeriodLabels(this.currentPeriod);
+    const data = getSalesByPeriod(this.sales, this.currentPeriod);
+    const labels = getPeriodLabels(this.currentPeriod);
 
-    this.drawBarLineChart(ctx, labels, data, 'Ventas', ['#7C3AED', '#A78BFA', '#C4B5FD']);
+    drawBarLineChart(ctx, labels, data, 'Ventas', ['#7C3AED', '#A78BFA', '#C4B5FD'], this.currencySymbol);
   }
 
   initCategoryChart(currencySymbol, categories) {
     const canvas = document.getElementById('report-category-chart');
-    if (!canvas) return;
+    if (!canvas) {
+      return;
+    }
 
     const ctx = canvas.getContext('2d');
-    const categoryData = this.getSalesByCategory(categories);
+    const categoryData = getSalesByCategory(this.sales, this.products, categories);
 
-    drawDoughnutChart(ctx, categoryData.labels, categoryData.data, ['#7C3AED', '#10B981', '#F59E0B', '#EF4444', '#3B82F6', '#8B5CF6'], currencySymbol);
+    drawDoughnutChart(
+      ctx,
+      categoryData.labels,
+      categoryData.data,
+      ['#7C3AED', '#10B981', '#F59E0B', '#EF4444', '#3B82F6', '#8B5CF6'],
+      currencySymbol
+    );
   }
 
   initPaymentChart(currencySymbol) {
     const canvas = document.getElementById('report-payment-chart');
-    if (!canvas) return;
+    if (!canvas) {
+      return;
+    }
 
     const ctx = canvas.getContext('2d');
-    const methods = { cash: 0, debit: 0, transfer: 0, account: 0 };
-    const labels = { cash: 'Efectivo', debit: 'Débito', transfer: 'Transferencia', account: 'Cuenta Corriente' };
+    const methods = {};
+    const labels = {};
+
+    PAYMENT_METHODS.forEach(m => {
+      methods[m.id] = 0;
+      labels[m.id] = m.label;
+    });
 
     this.sales.forEach(sale => {
       const payments = getPayments(sale);
       payments.forEach(p => {
         if (methods[p.method] !== undefined) {
           methods[p.method] += p.amount;
+        } else {
+          methods[p.method] = p.amount;
+          labels[p.method] = p.method;
         }
       });
     });
@@ -233,221 +273,47 @@ class Reports {
     drawPieChart(ctx, methodLabels, methodData, methodColors, currencySymbol);
   }
 
-  renderTopProductsDetailed(currencySymbol) {
+  renderTopProducts() {
     const container = document.getElementById('report-top-products');
-    if (!container) return;
-
-    const productCounts = {};
-    this.sales.forEach(sale => {
-      if (sale.items && Array.isArray(sale.items)) {
-        sale.items.forEach(item => {
-          if (!productCounts[item.productId]) {
-            const product = this.products.find(p => p.id === item.productId);
-            productCounts[item.productId] = {
-              name: item.name || (product ? product.name : 'Unknown'),
-              quantity: 0,
-              total: 0,
-              image: product ? product.image : ''
-            };
-          }
-          productCounts[item.productId].quantity += (item.quantity || 0);
-          productCounts[item.productId].total += (parseFloat(item.subtotal) || 0);
-        });
-      }
-    });
-
-    const topProducts = Object.values(productCounts)
-      .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, 10);
-
-    if (topProducts.length === 0) {
-      container.innerHTML = '<p style="color:var(--color-text-secondary);font-size:var(--text-sm);padding:var(--space-4);">No hay datos disponibles</p>';
+    if (!container) {
       return;
     }
 
-    container.innerHTML = topProducts.map((prod, i) => `
-      <div class="top-product-item">
-        <div class="top-product-item__image">
-          ${prod.image ? `<img src="${prod.image}" alt="${prod.name}">` : `<i class="fa-solid fa-box"></i>`}
-        </div>
-        <div style="flex:1;">
-          <div style="font-weight:var(--font-medium);font-size:var(--text-sm);">${i + 1}. ${prod.name}</div>
-          <div style="font-size:var(--text-xs);color:var(--color-text-secondary);">${prod.quantity} vendidos - ${currencySymbol} ${prod.total.toFixed(2)}</div>
-        </div>
-        <div style="font-weight:var(--font-bold);font-size:var(--text-sm);color:var(--color-primary);">
-          #${i + 1}
-        </div>
-      </div>
-    `).join('');
+    container.innerHTML = renderTopProductsDetailed(this.sales, this.products, this.currencySymbol);
   }
 
-  attachPeriodSelector() {
-    const selector = document.getElementById('report-period-selector');
-    if (!selector) return;
-
-    selector.querySelectorAll('.chart-period-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        selector.querySelectorAll('.chart-period-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        this.currentPeriod = parseInt(btn.dataset.period);
-        this.initMainChart();
-      });
-    });
-  }
-
-  getSalesByPeriod(days) {
-    const dateMap = {};
-    this.sales.forEach(s => {
-      if (s.date) {
-        const day = s.date.substring(0, 10);
-        dateMap[day] = (dateMap[day] || 0) + (parseFloat(s.total) || 0);
-      }
-    });
-    const data = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
-      data.push(dateMap[dateStr] || 0);
-    }
-    return data;
-  }
-
-  getPeriodLabels(days) {
-    const labels = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      labels.push((d.getMonth() + 1) + '/' + d.getDate());
-    }
-    return labels;
-  }
-
-  getSalesByCategory(categories) {
-    const categoryTotals = {};
-
-    this.sales.forEach(sale => {
-      if (sale.items && Array.isArray(sale.items)) {
-        sale.items.forEach(item => {
-          const product = this.products.find(p => p.id === item.productId);
-          const categoryId = product ? product.categoryId : 'unknown';
-          categoryTotals[categoryId] = (categoryTotals[categoryId] || 0) + (parseFloat(item.subtotal) || 0);
-        });
-      }
-    });
-
-    const categoryMap = {};
-    (categories || []).forEach(c => {
-      categoryMap[c.id] = c.name;
-    });
-
-    return {
-      labels: Object.keys(categoryTotals).map(k => categoryMap[k] || 'Sin categoría'),
-      data: Object.values(categoryTotals)
-    };
-  }
-
-  drawBarLineChart(ctx, labels, data, label, colors) {
-    const canvas = ctx.canvas;
-    const dpr = window.devicePixelRatio || 1;
-    const width = canvas.offsetWidth || 400;
-    const height = canvas.height;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    ctx.scale(dpr, dpr);
-
-    const padding = { top: 20, right: 20, bottom: 40, left: 60 };
-    const chartWidth = width - padding.left - padding.right;
-    const chartHeight = height - padding.top - padding.bottom;
-    const maxValue = Math.max(...data, 1);
-
-    let lastHoverIndex = -1;
-
-    function drawChart(hoverIndex) {
-      ctx.save();
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
-
-      ctx.strokeStyle = '#E5E7EB';
-      ctx.fillStyle = '#6B7280';
-      ctx.font = '11px Inter';
-      ctx.textAlign = 'right';
-
-      for (let i = 0; i <= 5; i++) {
-        const y = padding.top + (chartHeight * i / 5);
-        const value = maxValue - (maxValue * i / 5);
-        ctx.beginPath();
-        ctx.moveTo(padding.left, y);
-        ctx.lineTo(width - padding.right, y);
-        ctx.stroke();
-        ctx.fillText('$' + Math.round(value), padding.left - 5, y + 4);
-      }
-
-      const barWidth = chartWidth / labels.length * 0.6;
-      const gap = chartWidth / labels.length * 0.4;
-
-      data.forEach((value, i) => {
-        const x = padding.left + (chartWidth * i / labels.length) + gap / 2;
-        const barHeight = (value / maxValue) * chartHeight;
-        const y = padding.top + chartHeight - barHeight;
-
-        const gradient = ctx.createLinearGradient(x, y, x, padding.top + chartHeight);
-        gradient.addColorStop(0, colors[i % colors.length]);
-        gradient.addColorStop(1, colors[(i + 1) % colors.length] || colors[i % colors.length]);
-
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.roundRect(x, y, barWidth, barHeight, [4, 4, 0, 0]);
-        ctx.fill();
-
-        if (value > 0) {
-          ctx.fillStyle = '#111827';
-          ctx.font = 'bold 11px Inter';
-          ctx.textAlign = 'center';
-          ctx.fillText('$' + Math.round(value), x + barWidth / 2, y - 8);
-        }
-      });
-
-      ctx.fillStyle = '#374151';
-      ctx.font = '11px Inter';
-      ctx.textAlign = 'center';
-      labels.forEach((label, i) => {
-        const x = padding.left + (chartWidth * i / labels.length) + chartWidth / labels.length / 2;
-        ctx.fillText(label, x, height - padding.bottom + 20);
-      });
-
-      if (hoverIndex >= 0 && hoverIndex < data.length && data[hoverIndex] > 0) {
-        ctx.fillStyle = '#111827';
-        ctx.font = 'bold 12px Inter';
-        ctx.textAlign = 'left';
-        ctx.fillText(`${labels[hoverIndex]}: $${Math.round(data[hoverIndex])}`, padding.left, padding.top - 10);
-      }
-
-      ctx.restore();
+  exportSalesCSV() {
+    if (this.sales.length === 0) {
+      return;
     }
 
-    canvas.onmousemove = (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = width / rect.width;
-      const mouseX = (e.clientX - rect.left) * scaleX;
-      const barIndex = Math.floor((mouseX - padding.left) / (chartWidth / labels.length));
+    const headers = ['ID', 'Fecha', 'Cliente', 'Subtotal', 'Descuento', 'IVA', 'Total', 'Método de Pago', 'Tipo'];
+    const rows = this.sales.map(sale => {
+      const customer = this.customers.find(c => c.id === sale.customerId);
+      return [
+        sale.id,
+        sale.date ? new Date(sale.date).toLocaleString('es-AR') : '',
+        customer ? customer.name : 'Consumidor Final',
+        sale.subtotal || 0,
+        sale.discount || 0,
+        sale.tax || 0,
+        sale.total || 0,
+        sale.paymentMethod || '',
+        sale.paymentType || 'SIMPLE'
+      ];
+    });
 
-      if (barIndex !== lastHoverIndex) {
-        lastHoverIndex = barIndex;
-        canvas.style.cursor = (barIndex >= 0 && barIndex < data.length && data[barIndex] > 0) ? 'pointer' : 'default';
-        drawChart(lastHoverIndex);
-      }
-    };
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
 
-    canvas.onmouseleave = () => {
-      if (lastHoverIndex >= 0) {
-        lastHoverIndex = -1;
-        canvas.style.cursor = 'default';
-        drawChart(-1);
-      }
-    };
-
-    drawChart(-1);
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `reporte_ventas_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 }
 

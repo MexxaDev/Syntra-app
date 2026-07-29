@@ -21,8 +21,9 @@ function stringToColor(str) {
  * @returns {string} Data URI of SVG
  */
 function generatePlaceholderSVG(name, bgColor) {
-  const initial = name.charAt(0).toUpperCase();
-  const truncatedName = name.length > 15 ? name.substring(0, 15) + '...' : name;
+  const safe = name.replace(/[<>"'&]/g, '');
+  const initial = safe.charAt(0).toUpperCase();
+  const truncatedName = safe.length > 15 ? safe.substring(0, 15) + '...' : safe;
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="${bgColor}"/><text x="100" y="80" font-family="Inter, Arial, sans-serif" font-size="56" font-weight="600" fill="white" text-anchor="middle" dominant-baseline="middle">${initial}</text><text x="100" y="130" font-family="Inter, Arial, sans-serif" font-size="14" fill="rgba(255,255,255,0.85)" text-anchor="middle" dominant-baseline="middle">${truncatedName}</text></svg>`;
 

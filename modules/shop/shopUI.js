@@ -2,6 +2,7 @@
 
 import ShopCart from './shopCart.js';
 import { getProductImage } from '../../utils/imageHelper.js';
+import { escapeHtml } from '../../utils/sanitizer.js';
 
 class ShopUI {
   static renderProductCard(product, categories = []) {
@@ -16,18 +17,19 @@ class ShopUI {
         ${hasPromo ? '<span class="shop-badge-promo">Promo</span>' : ''}
         ${isOutOfStock ? '<div class="shop-out-of-stock-overlay"><span>Agotado</span></div>' : ''}
         <div class="shop-product-image">
-          <img src="${imageSrc}" alt="${product.name}" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">
+          <img src="${imageSrc}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">
         </div>
         <div class="shop-product-info">
-          <h3 class="shop-product-name">${product.name}</h3>
-          ${product.description ? `<p class="shop-product-desc">${product.description}</p>` : ''}
+          <h3 class="shop-product-name">${escapeHtml(product.name)}</h3>
+          ${product.description ? `<p class="shop-product-desc">${escapeHtml(product.description)}</p>` : ''}
           <div class="shop-product-footer">
             <span class="shop-product-price">$${price.toLocaleString()}</span>
-            ${!isOutOfStock
-              ? `<button class="shop-btn-add" data-product-id="${product.id}">
+            ${
+              !isOutOfStock
+                ? `<button class="shop-btn-add" data-product-id="${product.id}">
                   <i class="fa-solid fa-plus"></i>
                 </button>`
-              : ''
+                : ''
             }
           </div>
         </div>
@@ -41,7 +43,7 @@ class ShopUI {
       <button class="shop-category-pill ${isActive ? 'active' : ''}"
               data-category-id="${category.id}"
               style="${isActive ? `background:${color};color:white;` : ''}">
-        ${category.name}
+        ${escapeHtml(category.name)}
       </button>
     `;
   }
@@ -57,9 +59,10 @@ class ShopUI {
           ${count > 0 ? `<span class="shop-cart-count">${count}</span>` : ''}
         </div>
         <div class="shop-cart-info">
-          ${count > 0
-            ? `<span class="shop-cart-total">$${subtotal.toLocaleString()}</span>`
-            : '<span class="shop-cart-empty">Carrito vacío</span>'
+          ${
+            count > 0
+              ? `<span class="shop-cart-total">$${subtotal.toLocaleString()}</span>`
+              : '<span class="shop-cart-empty">Carrito vacío</span>'
           }
         </div>
         <i class="fa-solid fa-chevron-up shop-cart-arrow"></i>
@@ -93,21 +96,22 @@ class ShopUI {
           <button class="shop-modal-close" id="shop-close-modal">&times;</button>
         </div>
         <div class="shop-cart-items">
-          ${items.map(item => {
-            const imageSrc = getProductImage(item, []);
-            const placeholder = getProductImage({ name: 'Product', image: '' }, []);
-            return `
+          ${items
+            .map(item => {
+              const imageSrc = getProductImage(item, []);
+              const placeholder = getProductImage({ name: 'Product', image: '' }, []);
+              return `
             <div class="shop-cart-item" data-product-id="${item.id}">
               <div class="shop-cart-item-image">
-                <img src="${imageSrc}" alt="${item.name}" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">
+                <img src="${imageSrc}" alt="${escapeHtml(item.name)}" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">
               </div>
               <div class="shop-cart-item-info">
-                <h4>${item.name}</h4>
+                <h4>${escapeHtml(item.name)}</h4>
                 <span class="shop-cart-item-price">$${(item.price * item.quantity).toLocaleString()}</span>
                 <button class="shop-note-btn" data-product-id="${item.id}" title="Agregar nota">
                   <i class="fa-solid fa-note-sticky"></i>
                 </button>
-                ${item.note ? `<p class="shop-cart-item-note">${item.note}</p>` : ''}
+                ${item.note ? `<p class="shop-cart-item-note">${escapeHtml(item.note)}</p>` : ''}
               </div>
               <div class="shop-cart-item-actions">
                 <div class="shop-quantity-control">
@@ -121,7 +125,8 @@ class ShopUI {
               </div>
             </div>
           `;
-          }).join('')}
+            })
+            .join('')}
         </div>
         <div class="shop-cart-footer">
           <div class="shop-cart-subtotal">
@@ -222,13 +227,14 @@ class ShopUI {
       <div class="shop-header">
         <div class="shop-header-content">
           <div class="shop-logo">
-            ${settings.logo
-              ? `<img src="${settings.logo}" alt="${businessName}">`
-              : `<div class="shop-logo-placeholder">${businessName.charAt(0)}</div>`
+            ${
+              settings.logo
+                ? `<img src="${settings.logo}" alt="${escapeHtml(businessName)}">`
+                : `<div class="shop-logo-placeholder">${escapeHtml(businessName.charAt(0))}</div>`
             }
           </div>
           <div class="shop-business-info">
-            <h1 class="shop-business-name">${businessName}</h1>
+            <h1 class="shop-business-name">${escapeHtml(businessName)}</h1>
             <div class="shop-status ${isOpen ? 'open' : 'closed'}">
               <span class="shop-status-dot"></span>
               ${isOpen ? 'Abierto' : 'Cerrado'}

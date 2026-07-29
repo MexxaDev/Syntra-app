@@ -4,6 +4,9 @@ import { productRepo, categoryRepo, settingRepo } from '../../db/repositories.js
 import ShopCart from './shopCart.js';
 import ShopUI from './shopUI.js';
 import ShopCheckout from './shopCheckout.js';
+import { logger } from '../../utils/logger.js';
+import { escapeHtml } from '../../utils/sanitizer.js';
+import state from '../../js/state.js';
 
 class Shop {
   constructor() {
@@ -16,7 +19,9 @@ class Shop {
 
   async load() {
     const container = document.getElementById('shop-content');
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     container.innerHTML = `
       <div class="shop-loading">
@@ -63,8 +68,9 @@ class Shop {
 
       // Pass settings to checkout
       ShopCheckout.setSettings(this.settings);
+      this._setupDataListeners();
     } catch (error) {
-      console.error('Error loading shop:', error);
+      logger.error('Shop', 'Error loading shop:', error);
       container.innerHTML = `
         <div class="shop-error">
           <i class="fa-solid fa-triangle-exclamation"></i>
@@ -74,12 +80,47 @@ class Shop {
     }
   }
 
+  _setupDataListeners() {
+    if (this._listenersAttached) {
+      return;
+    }
+    this._listenersAttached = true;
+
+    state.on('data:products-changed', () => {
+      this.load();
+    });
+
+    state.on('data:categories-changed', () => {
+      this.load();
+    });
+
+    state.on('data:settings-changed', newSettings => {
+      this.settings = newSettings || {};
+      ShopCheckout.setSettings(this.settings);
+      if (this.settings.shop_enabled !== 'true') {
+        const container = document.getElementById('shop-content');
+        if (container) {
+          container.innerHTML = `
+            <div class="shop-error">
+              <i class="fa-solid fa-shop-slash"></i>
+              <p>El catálogo online no está disponible</p>
+            </div>
+          `;
+        }
+      } else {
+        this.load();
+      }
+    });
+  }
+
   setupSearch() {
     const searchInput = document.getElementById('shop-search');
-    if (!searchInput) return;
+    if (!searchInput) {
+      return;
+    }
 
     let timeout;
-    searchInput.addEventListener('input', (e) => {
+    searchInput.addEventListener('input', e => {
       clearTimeout(timeout);
       timeout = setTimeout(() => {
         this.searchQuery = e.target.value;
@@ -128,7 +169,9 @@ class Shop {
 
   render() {
     const container = document.getElementById('shop-content');
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     const businessName = this.settings.businessName || 'Mi Negocio';
 
@@ -139,7 +182,7 @@ class Shop {
         <div class="shop-search-box">
           <i class="fa-solid fa-magnifying-glass"></i>
           <input type="text" id="shop-search" class="shop-search-input"
-                 placeholder="Buscar productos..." value="${this.searchQuery}">
+                 placeholder="Buscar productos..." value="${escapeHtml(this.searchQuery)}">
         </div>
       </div>
 
@@ -148,23 +191,25 @@ class Shop {
                 data-category-id="all">
           Todos
         </button>
-        ${this.categories.map(cat =>
-          ShopUI.renderCategoryPill(cat, this.currentCategory === cat.id)
-        ).join('')}
+        ${this.categories.map(cat => ShopUI.renderCategoryPill(cat, this.currentCategory === cat.id)).join('')}
       </div>
 
         <div class="shop-products-grid" id="shop-products">
-          ${this.getFilteredProducts().map(p =>
-            ShopUI.renderProductCard(p, this.categories)
-          ).join('')}
+          ${this.getFilteredProducts()
+            .map(p => ShopUI.renderProductCard(p, this.categories))
+            .join('')}
         </div>
 
-      ${this.products.length === 0 ? `
+      ${
+        this.products.length === 0
+          ? `
         <div class="shop-empty">
           <i class="fa-solid fa-box-open"></i>
           <p>No hay productos disponibles</p>
         </div>
-      ` : ''}
+      `
+          : ''
+      }
     `;
 
     this.setupEvents();
@@ -180,9 +225,8 @@ class Shop {
 
     if (this.searchQuery) {
       const query = this.searchQuery.toLowerCase();
-      products = products.filter(p =>
-        p.name.toLowerCase().includes(query) ||
-        (p.description && p.description.toLowerCase().includes(query))
+      products = products.filter(
+        p => p.name.toLowerCase().includes(query) || (p.description && p.description.toLowerCase().includes(query))
       );
     }
 
@@ -190,17 +234,6 @@ class Shop {
   }
 
   setupEvents() {
-    const searchInput = document.getElementById('shop-search');
-    let searchTimeout;
-
-    searchInput?.addEventListener('input', (e) => {
-      clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(() => {
-        this.searchQuery = e.target.value;
-        this.updateProducts();
-      }, 300);
-    });
-
     document.querySelectorAll('.shop-category-pill').forEach(pill => {
       pill.addEventListener('click', () => {
         const categoryId = pill.dataset.categoryId;
@@ -220,7 +253,9 @@ class Shop {
 
   setupProductDelegation() {
     const productsGrid = document.getElementById('shop-products');
-    if (!productsGrid) return;
+    if (!productsGrid) {
+      return;
+    }
 
     // Remove existing listener to avoid duplicates
     if (this._productClickHandler) {
@@ -228,9 +263,11 @@ class Shop {
     }
 
     // Event delegation for add buttons
-    this._productClickHandler = (e) => {
+    this._productClickHandler = e => {
       const addBtn = e.target.closest('.shop-btn-add');
-      if (!addBtn || addBtn.disabled) return;
+      if (!addBtn || addBtn.disabled) {
+        return;
+      }
 
       e.preventDefault();
       e.stopPropagation();
@@ -284,7 +321,9 @@ class Shop {
 
   updateProducts() {
     const container = document.getElementById('shop-products');
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     const products = this.getFilteredProducts();
 
@@ -298,16 +337,16 @@ class Shop {
       return;
     }
 
-    container.innerHTML = products.map(p =>
-      ShopUI.renderProductCard(p, this.categories)
-    ).join('');
+    container.innerHTML = products.map(p => ShopUI.renderProductCard(p, this.categories)).join('');
 
     // Re-setup delegation after re-render
     this.setupProductDelegation();
   }
 
   animateAddButton(btn) {
-    if (!btn) return;
+    if (!btn) {
+      return;
+    }
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-check"></i>';
     btn.classList.add('adding');
@@ -320,13 +359,15 @@ class Shop {
 
   showToast(message, type = 'info') {
     const existing = document.querySelector('.shop-toast');
-    if (existing) existing.remove();
+    if (existing) {
+      existing.remove();
+    }
 
     const toast = document.createElement('div');
     toast.className = `shop-toast shop-toast-${type}`;
     toast.innerHTML = `
       <i class="fa-solid fa-${type === 'success' ? 'check' : 'exclamation'}-circle"></i>
-      <span>${message}</span>
+      <span>${escapeHtml(message)}</span>
     `;
 
     document.body.appendChild(toast);
@@ -340,7 +381,9 @@ class Shop {
 
   showClosedBanner() {
     const container = document.querySelector('.shop-container');
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     const banner = document.createElement('div');
     banner.className = 'shop-closed-banner';

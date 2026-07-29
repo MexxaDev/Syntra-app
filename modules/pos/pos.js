@@ -1,14 +1,24 @@
 'use strict';
 
-import { productRepo, customerRepo, saleRepo, saleItemRepo, categoryRepo } from '../../db/repositories.js';
+import {
+  productRepo,
+  customerRepo,
+  saleRepo,
+  saleItemRepo,
+  categoryRepo,
+  settingRepo,
+  generateSaleId
+} from '../../db/repositories.js';
 import Toast from '../../components/toast.js';
-import Modal from '../../components/modal.js';
 import state from '../../js/state.js';
 import { format } from '../../utils/currency.js';
 import { getProductImage } from '../../utils/imageHelper.js';
-import { PAYMENT_METHODS, getPaymentMethodLabel, getPayments, getPaymentType, validatePayments } from '../../utils/payments.js';
+import { logger } from '../../utils/logger.js';
+import { PAYMENT_METHODS, validatePayments, loadPaymentMethods } from '../../utils/payments.js';
 import { renderTicketBody, showTicketModal } from '../../utils/ticket.js';
+import cash from '../cash/cash.js';
 import cashService from '../cash/cashService.js';
+import { escapeHtml } from '../../utils/sanitizer.js';
 
 class POS {
   constructor() {
@@ -21,21 +31,28 @@ class POS {
     this.discount = 0;
     this.discountType = 'percent';
     this.payments = [{ method: 'cash', amount: 0 }];
+    this.settings = {};
     this._isProcessing = false;
   }
 
   async loadProducts() {
     await cashService.requireActiveSession();
 
-    const [products, customers, categories] = await Promise.all([
+    const [products, customers, categories, settings] = await Promise.all([
       productRepo.findAll(),
       customerRepo.findAll(),
-      categoryRepo.findAll()
+      categoryRepo.findAll(),
+      settingRepo.findAll()
     ]);
 
-    this.products = products;
+    this.products = products.filter(p => !p.inactive && p.visible !== false);
     this.categories = categories;
     this.customers = customers;
+
+    this.settings = {};
+    settings.forEach(s => {
+      this.settings[s.key] = s.value;
+    });
 
     this.renderProducts();
     this._injectCategoryPills();
@@ -44,11 +61,51 @@ class POS {
     this.setupBarcodeInput();
     this._renderPaymentUI();
     this._injectCashButton();
+    this._setupDataListeners();
+    this._setupKeyboardShortcuts();
+  }
+
+  _setupDataListeners() {
+    if (this._listenersAttached) {
+      return;
+    }
+    this._listenersAttached = true;
+
+    state.on('data:settings-changed', newSettings => {
+      this.settings = newSettings || {};
+      this.renderCart();
+      this._renderPaymentUI();
+    });
+
+    state.on('data:categories-changed', async () => {
+      this.categories = await categoryRepo.findAll();
+      this._injectCategoryPills();
+      this.renderProducts();
+    });
+
+    state.on('data:products-changed', async () => {
+      const all = await productRepo.findAll();
+      this.products = all.filter(p => !p.inactive && p.visible !== false);
+      this.renderProducts();
+    });
+
+    state.on('data:customers-changed', async () => {
+      this.customers = await customerRepo.findAll();
+      this.renderCustomerSelect();
+    });
+
+    state.on('data:payment-methods-changed', async () => {
+      await loadPaymentMethods();
+      this._renderPaymentUI();
+      this.renderCart();
+    });
   }
 
   _injectCategoryPills() {
     const container = document.querySelector('.pos-products');
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     let pillsContainer = document.getElementById('pos-category-pills');
     if (pillsContainer) {
@@ -61,9 +118,13 @@ class POS {
 
     pillsContainer.innerHTML = `
       <button class="pos-category-pill ${!this.currentCategory ? 'active' : ''}" data-category-id="all">Todos</button>
-      ${this.categories.map(cat => `
-        <button class="pos-category-pill ${this.currentCategory === cat.id ? 'active' : ''}" data-category-id="${cat.id}">${cat.name}</button>
-      `).join('')}
+      ${this.categories
+        .map(
+          cat => `
+        <button class="pos-category-pill ${this.currentCategory === cat.id ? 'active' : ''}" data-category-id="${escapeHtml(cat.id)}">${escapeHtml(cat.name)}</button>
+      `
+        )
+        .join('')}
     `;
 
     const searchBar = container.querySelector('.pos-search-bar');
@@ -90,23 +151,18 @@ class POS {
   }
 
   setupBarcodeInput() {
+    if (this._barcodeAttached) {
+      return;
+    }
     const barcodeInput = document.getElementById('pos-barcode-input');
-    if (!barcodeInput) return;
+    if (!barcodeInput) {
+      return;
+    }
 
+    this._barcodeAttached = true;
     setTimeout(() => barcodeInput.focus(), 100);
 
-    let timeout;
-    barcodeInput.oninput = (e) => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => {
-        const code = e.target.value.trim();
-        if (code.length > 2) {
-          this.searchBarcode(code);
-        }
-      }, 100);
-    };
-
-    barcodeInput.onkeydown = (e) => {
+    barcodeInput.addEventListener('keydown', e => {
       if (e.key === 'Enter') {
         e.preventDefault();
         const code = barcodeInput.value.trim();
@@ -114,28 +170,167 @@ class POS {
           this.searchBarcode(code);
         }
       }
-    };
+    });
+  }
+
+  _setupKeyboardShortcuts() {
+    if (this._kbAttached) {
+      return;
+    }
+    this._kbAttached = true;
+
+    document.addEventListener('keydown', e => {
+      const tag = document.activeElement?.tagName || '';
+      const isInput = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
+
+      if (e.key === 'F2' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        document.getElementById('pos-search-input')?.focus();
+        return;
+      }
+
+      if (e.key === 'F3' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        document.getElementById('pos-barcode-input')?.focus();
+        return;
+      }
+
+      if (e.key === 'F4' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        document.getElementById('confirm-sale-btn')?.click();
+        return;
+      }
+
+      if (e.key === 'F5' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        document.getElementById('discount-value')?.focus();
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        if (isInput) {
+          document.activeElement?.blur();
+        } else {
+          const searchInput = document.getElementById('pos-search-input');
+          if (searchInput && searchInput.value) {
+            searchInput.value = '';
+            this.renderProducts();
+          }
+        }
+        return;
+      }
+
+      if (e.key === '?' && !isInput) {
+        e.preventDefault();
+        this._showShortcutsHelp();
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        document.getElementById('confirm-sale-btn')?.click();
+        return;
+      }
+    });
+  }
+
+  _showShortcutsHelp() {
+    const existing = document.querySelector('.pos-shortcuts-help');
+    if (existing) {
+      existing.remove();
+      return;
+    }
+
+    const shortcuts = [
+      ['F2', 'Buscar productos'],
+      ['F3', 'Código de barras'],
+      ['F4', 'Confirmar venta'],
+      ['F5', 'Descuento'],
+      ['Esc', 'Limpiar / Salir'],
+      ['Ctrl+Enter', 'Confirmar venta'],
+      ['?', 'Ayuda de atajos']
+    ];
+
+    const overlay = document.createElement('div');
+    overlay.className = 'pos-shortcuts-help';
+    overlay.innerHTML = `
+      <div class="pos-shortcuts-help__card">
+        <div class="pos-shortcuts-help__title">Atajos de teclado</div>
+        <div class="pos-shortcuts-help__grid">
+          ${shortcuts
+            .map(
+              ([key, action]) => `
+            <div class="pos-shortcuts-help__row">
+              <span class="pos-shortcuts-help__action">${action}</span>
+              <span class="pos-shortcuts-help__key">${key}</span>
+            </div>
+          `
+            )
+            .join('')}
+        </div>
+      </div>
+    `;
+    overlay.addEventListener('click', e => {
+      if (e.target === overlay) {
+        overlay.remove();
+      }
+    });
+    document.body.appendChild(overlay);
   }
 
   async searchBarcode(code) {
     const barcodeInput = document.getElementById('pos-barcode-input');
-    let product = this.products.find(p =>
-      (p.barcode && p.barcode === code) || p.id === code
-    );
+    let product = this.products.find(p => {
+      if (p.barcode === code || p.id === code) {
+        return true;
+      }
+      if (p.barcodes_extra) {
+        try {
+          return JSON.parse(p.barcodes_extra).includes(code);
+        } catch {
+          return false;
+        }
+      }
+      return false;
+    });
 
     if (!product) {
-      product = this.products.find(p =>
-        p.sku && p.sku === code
-      );
+      product = this.products.find(p => p.sku && p.sku === code);
+    }
+
+    let quantity = 1;
+
+    if (!product) {
+      for (const p of this.products) {
+        const candidates = [p.barcode];
+        if (p.barcodes_extra) {
+          try {
+            candidates.push(...JSON.parse(p.barcodes_extra));
+          } catch {
+            /* ignore */
+          }
+        }
+        candidates.push(p.sku, p.id);
+        const matched = candidates.find(c => c && code.endsWith(c) && code.length > c.length);
+        if (matched) {
+          const prefix = code.slice(0, code.length - matched.length);
+          const parsed = parseInt(prefix, 10);
+          if (!isNaN(parsed) && parsed > 0 && String(parsed) === prefix) {
+            product = p;
+            quantity = parsed;
+            break;
+          }
+        }
+      }
     }
 
     if (product) {
-      this.addToCart(product.id);
+      this.addToCart(product.id, quantity);
       if (barcodeInput) {
         barcodeInput.value = '';
         barcodeInput.focus();
       }
-      Toast.success('Agregado', `${product.name} agregado al carrito`);
+      Toast.success('Agregado', `${quantity > 1 ? quantity + 'x ' : ''}${product.name} agregado al carrito`);
     } else {
       Toast.error('No encontrado', `Producto con código "${code}" no encontrado`);
       if (barcodeInput) {
@@ -147,41 +342,68 @@ class POS {
 
   renderProducts() {
     const container = document.getElementById('pos-product-list');
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     const searchInput = document.querySelector('.pos-search-bar .form-input');
     const query = searchInput ? searchInput.value.toLowerCase() : '';
 
     let products = this.products;
     if (query) {
-      products = products.filter(p =>
-        p.name.toLowerCase().includes(query) ||
-        (p.barcode && p.barcode.includes(query))
-      );
+      products = products.filter(p => {
+        if (p.name.toLowerCase().includes(query)) {
+          return true;
+        }
+        if (p.barcode && p.barcode.includes(query)) {
+          return true;
+        }
+        if (p.barcodes_extra) {
+          try {
+            return JSON.parse(p.barcodes_extra).some(e => e.includes(query));
+          } catch {
+            return false;
+          }
+        }
+        return false;
+      });
     }
     if (this.currentCategory) {
       products = products.filter(p => p.categoryId === this.currentCategory);
     }
 
     if (products.length === 0) {
-      container.innerHTML = '<p class="pos-cart-empty" style="padding:var(--space-4);">No hay productos disponibles.</p>';
+      container.innerHTML =
+        '<p class="pos-cart-empty" style="padding:var(--space-4);">No hay productos disponibles.</p>';
       return;
     }
 
     const placeholder = getProductImage({ name: 'Product', image: '' }, []);
 
-    container.innerHTML = products.map(product => {
-      const imageSrc = getProductImage(product, this.categories);
-      return `
-        <div class="pos-product-card" data-id="${product.id}">
+    container.innerHTML = products
+      .map(product => {
+        const imageSrc = getProductImage(product, this.categories);
+        const outOfStock = product.stock <= 0;
+        const lowStock = product.stock <= 5 && product.stock > 0;
+        let stockBadge = '';
+        if (outOfStock) {
+          stockBadge =
+            '<span class="pos-product-card__stock-badge pos-product-card__stock-badge--out">Sin stock</span>';
+        } else if (lowStock) {
+          stockBadge = `<span class="pos-product-card__stock-badge pos-product-card__stock-badge--low">${product.stock}</span>`;
+        }
+        return `
+        <div class="pos-product-card ${outOfStock ? 'pos-product-card--out-of-stock' : ''}" data-id="${escapeHtml(product.id)}">
           <div class="pos-product-card__image">
-            <img src="${imageSrc}" alt="${product.name}" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">
+            ${stockBadge}
+            <img src="${imageSrc}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${escapeHtml(placeholder)}';">
           </div>
-          <div class="pos-product-card__name">${product.name}</div>
+          <div class="pos-product-card__name">${escapeHtml(product.name)}</div>
           <div class="pos-product-card__price">${format(product.price)}</div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
 
     container.querySelectorAll('.pos-product-card').forEach(card => {
       card.addEventListener('click', () => {
@@ -190,59 +412,86 @@ class POS {
       });
     });
 
-    if (searchInput) {
+    if (searchInput && !this._searchAttached) {
+      this._searchAttached = true;
       let timeout;
-      searchInput.oninput = (e) => {
+      searchInput.addEventListener('input', () => {
         clearTimeout(timeout);
         timeout = setTimeout(() => this.renderProducts(), 300);
-      };
+      });
     }
   }
 
-  addToCart(productId) {
+  addToCart(productId, quantity = 1) {
     const product = this.products.find(p => p.id === productId);
-    if (!product) return;
+    if (!product) {
+      return;
+    }
+
+    if (!product.variablePrice && product.stock <= 0) {
+      Toast.error('Sin stock', `${product.name} no tiene stock disponible`);
+      return;
+    }
 
     const existing = this.cart.find(item => item.id === productId);
     if (existing) {
-      existing.quantity += 1;
+      if (!product.variablePrice && existing.quantity + quantity > product.stock) {
+        Toast.error('Sin stock', `${product.name} solo tiene ${product.stock} unidades`);
+        return;
+      }
+      existing.quantity += quantity;
     } else {
-      this.cart.push({ ...product, quantity: 1 });
+      if (!product.variablePrice && quantity > product.stock) {
+        Toast.error('Sin stock', `${product.name} solo tiene ${product.stock} unidades`);
+        return;
+      }
+      this.cart.push({ ...product, quantity });
     }
     this.renderCart();
   }
 
   renderCart() {
     const container = document.getElementById('cart-items');
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     if (this.cart.length === 0) {
-      container.innerHTML = '<div class="pos-cart-empty"><i class="fa-solid fa-cart-shopping"></i>El carrito está vacío</div>';
+      container.innerHTML =
+        '<div class="pos-cart-empty"><i class="fa-solid fa-cart-shopping"></i>El carrito está vacío</div>';
       this.updateTotal();
+      this._updateCartCount();
       return;
     }
 
     const placeholder = getProductImage({ name: 'Product', image: '' }, []);
 
-    container.innerHTML = this.cart.map((item, index) => {
-      const imageSrc = getProductImage(item, this.categories);
-      return `
+    container.innerHTML = this.cart
+      .map((item, index) => {
+        const imageSrc = getProductImage(item, this.categories);
+        return `
         <div class="pos-cart-item">
           <div class="pos-cart-item__image">
-            <img src="${imageSrc}" alt="${item.name}" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">
+            <img src="${imageSrc}" alt="${escapeHtml(item.name)}" loading="lazy" onerror="this.onerror=null;this.src='${escapeHtml(placeholder)}';">
           </div>
           <div class="pos-cart-item__info">
-            <div class="pos-cart-item__name">${item.name}</div>
-            <div class="pos-cart-item__price">${format(item.price)} x ${item.quantity}</div>
+            <div class="pos-cart-item__name">${escapeHtml(item.name)}</div>
+            <div class="pos-cart-item__price">${
+              item.variablePrice
+                ? `$ <input type="number" class="pos-cart-item__price-input" value="${item.price}" min="0" step="0.01" data-index="${index}"> x ${item.quantity}`
+                : `${format(item.price)} x <input type="number" class="pos-cart-item__qty-input" value="${item.quantity}" min="1" max="${item.stock || 999}" data-index="${index}">`
+            }</div>
           </div>
           <div class="pos-cart-item__actions">
             <button class="pos-cart-item__btn pos-cart-item__btn--remove" data-index="${index}">&minus;</button>
             <span class="pos-cart-item__qty">${item.quantity}</span>
             <button class="pos-cart-item__btn pos-cart-item__btn--add" data-index="${index}">+</button>
+            <button class="pos-cart-item__delete" data-index="${index}" title="Eliminar" aria-label="Eliminar"><i class="fa-solid fa-trash-can"></i></button>
           </div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
 
     container.querySelectorAll('.pos-cart-item__btn--remove').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -254,12 +503,65 @@ class POS {
     container.querySelectorAll('.pos-cart-item__btn--add').forEach(btn => {
       btn.addEventListener('click', () => {
         const idx = parseInt(btn.dataset.index);
+        if (this.cart[idx].quantity >= this.cart[idx].stock) {
+          Toast.error('Sin stock', `${this.cart[idx].name} solo tiene ${this.cart[idx].stock} unidades`);
+          return;
+        }
         this.cart[idx].quantity += 1;
         this.renderCart();
       });
     });
 
+    container.querySelectorAll('.pos-cart-item__delete').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.index);
+        this.cart.splice(idx, 1);
+        this.renderCart();
+      });
+    });
+
+    container.querySelectorAll('.pos-cart-item__qty-input').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const idx = parseInt(inp.dataset.index);
+        let val = parseInt(inp.value) || 1;
+        if (val < 1) {
+          val = 1;
+        }
+        if (val > (this.cart[idx].stock || 999)) {
+          Toast.error('Sin stock', `${this.cart[idx].name} solo tiene ${this.cart[idx].stock} unidades`);
+          val = this.cart[idx].stock;
+        }
+        this.cart[idx].quantity = val;
+        this.renderCart();
+      });
+      inp.addEventListener('focus', () => inp.select());
+    });
+
+    container.querySelectorAll('.pos-cart-item__price-input').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const idx = parseInt(inp.dataset.index);
+        const val = parseFloat(inp.value);
+        if (isNaN(val) || val < 0) {
+          inp.value = this.cart[idx].price;
+          return;
+        }
+        this.cart[idx].price = val;
+        this.renderCart();
+      });
+      inp.addEventListener('focus', () => inp.select());
+    });
+
     this.updateTotal();
+    this._updateCartCount();
+  }
+
+  _updateCartCount() {
+    const el = document.getElementById('cart-count');
+    if (!el) {
+      return;
+    }
+    const total = this.cart.reduce((s, i) => s + i.quantity, 0);
+    el.textContent = total > 0 ? total : '';
   }
 
   removeFromCart(index) {
@@ -273,48 +575,113 @@ class POS {
 
   renderCustomerSelect() {
     const container = document.getElementById('pos-customer-select');
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
-    let options = '<option value="">Consumidor Final</option>';
-    options += this.customers.map(c => {
-      const saldo = c.balance || 0;
-      return `<option value="${c.id}" data-balance="${saldo}">${c.name} (Saldo: ${format(saldo)})</option>`;
-    }).join('');
+    const defaultCustomer = this.customers.find(c => c.id === 'cust_final');
+    const otherCustomers = this.customers.filter(c => c.id !== 'cust_final');
+
+    let options = '';
+    if (defaultCustomer) {
+      options = `<option value="${defaultCustomer.id}">Consumidor Final</option>`;
+    } else {
+      options = '<option value="">Consumidor Final</option>';
+    }
+
+    options += otherCustomers
+      .map(c => {
+        const saldo = c.balance || 0;
+        return `<option value="${escapeHtml(c.id)}" data-balance="${saldo}">${escapeHtml(c.name)} (Saldo: ${format(saldo)})</option>`;
+      })
+      .join('');
 
     container.innerHTML = options;
 
-    container.onchange = (e) => {
+    if (defaultCustomer) {
+      this.currentCustomer = defaultCustomer;
+    }
+
+    this._setupCustomerSelectEvents();
+  }
+
+  _setupCustomerSelectEvents() {
+    if (this._customerSelectAttached) {
+      return;
+    }
+    this._customerSelectAttached = true;
+    const container = document.getElementById('pos-customer-select');
+    if (!container) {
+      return;
+    }
+
+    container.addEventListener('change', e => {
       const customerId = e.target.value;
       this.currentCustomer = customerId ? this.customers.find(c => c.id === customerId) : null;
       this.updateCustomerInfo();
-    };
+    });
   }
 
   updateCustomerInfo() {
     const infoContainer = document.getElementById('customer-info');
-    if (!infoContainer) return;
+    if (!infoContainer) {
+      return;
+    }
 
     if (this.currentCustomer) {
-      infoContainer.innerHTML = `Saldo: <strong>${format(this.currentCustomer.balance || 0)}</strong>`;
+      const balance = this.currentCustomer.balance || 0;
+      const isDebt = balance > 0;
+      const creditLimitEnabled = this.settings.creditLimitEnabled !== 'false';
+      const creditLimit = parseFloat(this.settings.creditLimit) || 0;
+      const isOverLimit = creditLimitEnabled && creditLimit > 0 && balance >= creditLimit;
+      const color = isDebt ? 'var(--color-danger)' : 'var(--color-success)';
+      const label = isDebt ? 'Deuda' : 'Saldo a favor';
+      const warningBadge = isOverLimit ? ' <span class="badge badge-warning">⚠️ Límite alcanzado</span>' : '';
+
+      infoContainer.innerHTML = `${label}: <strong style="color:${color};">${format(balance)}</strong>${warningBadge}`;
+
+      if (isOverLimit && this._lastWarnedCustomer !== this.currentCustomer.id) {
+        this._lastWarnedCustomer = this.currentCustomer.id;
+        Toast.warning(
+          'Límite de crédito',
+          `${this.currentCustomer.name} superó el límite de crédito (${format(creditLimit)})`
+        );
+      }
     } else {
       infoContainer.innerHTML = '';
+      this._lastWarnedCustomer = null;
     }
   }
 
   updateTotal() {
-    const subtotal = this.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const discountAmount = this.discountType === 'percent'
-      ? subtotal * (this.discount / 100)
-      : this.discount;
-    const total = subtotal - discountAmount;
+    const { subtotal, discountAmount, taxRate, taxAmount, total } = this._getTotal();
 
     const subtotalEl = document.getElementById('cart-subtotal');
     const discountEl = document.getElementById('cart-discount');
     const totalEl = document.getElementById('cart-total');
+    const taxRow = document.getElementById('pos-tax-row');
+    const taxRateEl = document.getElementById('cart-tax-rate');
+    const taxEl = document.getElementById('cart-tax');
 
-    if (subtotalEl) subtotalEl.textContent = `$${subtotal.toFixed(2)}`;
-    if (discountEl) discountEl.textContent = `-$${discountAmount.toFixed(2)}`;
-    if (totalEl) totalEl.textContent = `$${total.toFixed(2)}`;
+    if (subtotalEl) {
+      subtotalEl.textContent = format(subtotal);
+    }
+    if (discountEl) {
+      discountEl.textContent = '-' + format(discountAmount);
+    }
+    if (totalEl) {
+      totalEl.textContent = format(total);
+    }
+
+    if (taxRow && taxEl && taxRateEl) {
+      if (taxRate > 0) {
+        taxRow.style.display = '';
+        taxRateEl.textContent = taxRate;
+        taxEl.textContent = format(taxAmount);
+      } else {
+        taxRow.style.display = 'none';
+      }
+    }
 
     if (this.payments.length === 1) {
       this.payments[0].amount = total;
@@ -330,24 +697,31 @@ class POS {
   }
 
   _getTotal() {
-    const subtotal = this.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const discountAmount = this.discountType === 'percent'
-      ? subtotal * (this.discount / 100)
-      : this.discount;
-    return subtotal - discountAmount;
+    const subtotal = this.cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const discountAmount = this.discountType === 'percent' ? subtotal * (this.discount / 100) : this.discount;
+    const taxEnabled = this.settings.taxEnabled !== 'false';
+    const taxRate = taxEnabled ? parseFloat(this.settings.taxRate) || 0 : 0;
+    const taxableAmount = subtotal - discountAmount;
+    const taxAmount = taxableAmount * (taxRate / 100);
+    const total = taxableAmount + taxAmount;
+    return { subtotal, discountAmount, taxRate, taxAmount, total };
   }
 
   _renderPaymentUI() {
     const container = document.querySelector('.pos-cart-footer');
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     const existing = document.getElementById('pos-multi-payment');
-    if (existing) existing.remove();
+    if (existing) {
+      existing.remove();
+    }
 
     const wrapper = document.createElement('div');
     wrapper.id = 'pos-multi-payment';
 
-    const total = this._getTotal();
+    const { total } = this._getTotal();
 
     if (this.payments.length === 1) {
       this.payments[0].amount = total;
@@ -380,6 +754,9 @@ class POS {
         <button class="btn btn-ghost btn-sm payment-add-btn" id="add-payment-btn">
           <i class="fa-solid fa-plus"></i> Agregar método
         </button>
+        <button class="btn btn-ghost btn-sm" id="quick-cash-btn" title="Efectivo exacto">
+          <i class="fa-solid fa-money-bill-wave"></i>
+        </button>
         <button class="btn btn-ghost btn-sm" id="reset-payments-btn">
           <i class="fa-solid fa-rotate-left"></i>
         </button>
@@ -389,88 +766,104 @@ class POS {
     const confirmBtn = document.getElementById('confirm-sale-btn');
     container.insertBefore(wrapper, confirmBtn);
 
-    document.getElementById('add-payment-btn').onclick = () => {
+    document.getElementById('add-payment-btn')?.addEventListener('click', () => {
       this.payments.push({ method: 'cash', amount: 0 });
       this._updatePaymentUI();
-    };
+    });
 
-    document.getElementById('reset-payments-btn').onclick = () => {
+    document.getElementById('reset-payments-btn')?.addEventListener('click', () => {
       this.payments = [{ method: 'cash', amount: 0 }];
       this._updatePaymentUI();
-    };
+    });
+
+    document.getElementById('quick-cash-btn')?.addEventListener('click', () => {
+      const { total } = this._getTotal();
+      this.payments = [{ method: 'cash', amount: total, _received: total }];
+      this._updatePaymentUI();
+      const receivedInput = document.querySelector('.payment-row__received');
+      if (receivedInput) {
+        receivedInput.value = total;
+        receivedInput.focus();
+        receivedInput.select();
+      }
+    });
 
     this._attachPaymentRowEvents();
     this._updatePaymentUI();
   }
 
   _renderPaymentRows() {
-    return this.payments.map((p, i) => {
-      const paid = this.payments.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0);
-      const total = this._getTotal();
-      const isCash = p.method === 'cash';
-      const allCash = this.payments.every(x => x.method === 'cash');
-      const cashIdx = this.payments.findIndex(x => x.method === 'cash');
-      const showReceived = isCash && (allCash || (cashIdx === i));
-      const changeVal = Math.max(0, (parseFloat(p._received) || 0) - (parseFloat(p.amount) || 0));
+    return this.payments
+      .map((p, i) => {
+        const isCash = p.method === 'cash';
+        const allCash = this.payments.every(x => x.method === 'cash');
+        const cashIdx = this.payments.findIndex(x => x.method === 'cash');
+        const showReceived = isCash && (allCash || cashIdx === i);
+        const changeVal = Math.max(0, (parseFloat(p._received) || 0) - (parseFloat(p.amount) || 0));
 
-      return `
+        return `
         <div class="payment-row" data-index="${i}">
           <select class="payment-row__method" data-index="${i}">
             ${PAYMENT_METHODS.map(m => `<option value="${m.id}" ${m.id === p.method ? 'selected' : ''}>${m.label}</option>`).join('')}
           </select>
           <div class="payment-row__amount-wrap">
             <input type="number" class="payment-row__amount" data-index="${i}" value="${p.amount || ''}" min="0" step="0.01" placeholder="0.00">
-            ${showReceived ? `
+            ${
+              showReceived
+                ? `
               <input type="number" class="payment-row__received" data-index="${i}" value="${p._received || ''}" placeholder="Recibido" min="0" step="0.01">
               <span class="payment-row__change ${changeVal > 0 ? 'has-change' : ''}" data-index="${i}">${format(changeVal)}</span>
-            ` : ''}
+            `
+                : ''
+            }
           </div>
-          ${this.payments.length > 1 ? `<button class="payment-row__remove" data-index="${i}"><i class="fa-solid fa-xmark"></i></button>` : ''}
+          ${this.payments.length > 1 ? `<button class="payment-row__remove" data-index="${i}" aria-label="Eliminar método de pago"><i class="fa-solid fa-xmark"></i></button>` : ''}
         </div>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   _attachPaymentRowEvents() {
     document.querySelectorAll('.payment-row__method').forEach(sel => {
-      sel.onchange = (e) => {
+      sel.addEventListener('change', e => {
         const idx = parseInt(e.target.dataset.index);
         this.payments[idx].method = e.target.value;
         this._updatePaymentUI();
-      };
+      });
     });
 
     document.querySelectorAll('.payment-row__amount').forEach(inp => {
-      inp.oninput = (e) => {
+      inp.addEventListener('input', e => {
         const idx = parseInt(e.target.dataset.index);
         this.payments[idx].amount = parseFloat(e.target.value) || 0;
         this._updatePaymentSummary();
         this._updateChange(idx);
-      };
-      inp.onfocus = (e) => e.target.select();
+      });
+      inp.addEventListener('focus', e => e.target.select());
     });
 
     document.querySelectorAll('.payment-row__received').forEach(inp => {
-      inp.oninput = (e) => {
+      inp.addEventListener('input', e => {
         const idx = parseInt(e.target.dataset.index);
         this.payments[idx]._received = parseFloat(e.target.value) || 0;
         this._updateChange(idx);
         this._updatePaymentSummary();
-      };
-      inp.onfocus = (e) => e.target.select();
+      });
+      inp.addEventListener('focus', e => e.target.select());
     });
 
     document.querySelectorAll('.payment-row__remove').forEach(btn => {
-      btn.onclick = (e) => {
-        const idx = parseInt(e.target.dataset.index);
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.index, 10);
         this.payments.splice(idx, 1);
         this._updatePaymentUI();
-      };
+      });
     });
   }
 
   _updatePaymentSummary() {
-    const total = this._getTotal();
+    const { total } = this._getTotal();
     const paid = this.payments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
     const remaining = Math.max(0, total - paid);
 
@@ -478,8 +871,12 @@ class POS {
     const paidEl = document.getElementById('payment-paid-display');
     const remainEl = document.getElementById('payment-remaining-display');
 
-    if (totalEl) totalEl.textContent = format(total);
-    if (paidEl) paidEl.textContent = format(paid);
+    if (totalEl) {
+      totalEl.textContent = format(total);
+    }
+    if (paidEl) {
+      paidEl.textContent = format(paid);
+    }
     if (remainEl) {
       remainEl.textContent = format(remaining);
       remainEl.className = 'payment-status__remaining' + (remaining <= 0.01 ? ' paid' : '');
@@ -489,7 +886,9 @@ class POS {
     if (progressBar && total > 0) {
       const pct = Math.min(100, (paid / total) * 100);
       const bar = progressBar.querySelector('.payment-progress__bar');
-      if (bar) bar.style.width = pct + '%';
+      if (bar) {
+        bar.style.width = pct + '%';
+      }
     }
 
     const confirmBtn = document.getElementById('confirm-sale-btn');
@@ -498,7 +897,6 @@ class POS {
       if (diff <= 0.01 && total > 0) {
         confirmBtn.disabled = false;
         confirmBtn.innerHTML = '<i class="fa-solid fa-check"></i> Confirmar Venta';
-        confirmBtn.onclick = () => this.confirmSale();
       } else {
         confirmBtn.disabled = true;
         confirmBtn.innerHTML = `Falta ${format(remaining)}`;
@@ -508,9 +906,11 @@ class POS {
 
   _updatePaymentUI() {
     const wrapper = document.getElementById('pos-multi-payment');
-    if (!wrapper) return;
+    if (!wrapper) {
+      return;
+    }
 
-    const total = this._getTotal();
+    const { total } = this._getTotal();
     const paid = this.payments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
     const remaining = Math.max(0, total - paid);
 
@@ -518,8 +918,12 @@ class POS {
     const paidEl = document.getElementById('payment-paid-display');
     const remainEl = document.getElementById('payment-remaining-display');
 
-    if (totalEl) totalEl.textContent = format(total);
-    if (paidEl) paidEl.textContent = format(paid);
+    if (totalEl) {
+      totalEl.textContent = format(total);
+    }
+    if (paidEl) {
+      paidEl.textContent = format(paid);
+    }
     if (remainEl) {
       remainEl.textContent = format(remaining);
       remainEl.className = 'payment-status__remaining' + (remaining <= 0.01 ? ' paid' : '');
@@ -537,7 +941,6 @@ class POS {
       if (diff <= 0.01 && total > 0) {
         confirmBtn.disabled = false;
         confirmBtn.innerHTML = '<i class="fa-solid fa-check"></i> Confirmar Venta';
-        confirmBtn.onclick = () => this.confirmSale();
       } else {
         confirmBtn.disabled = true;
         confirmBtn.innerHTML = `Falta ${format(remaining)}`;
@@ -548,7 +951,9 @@ class POS {
   _updateChange(idx) {
     const receivedEl = document.querySelector(`.payment-row__received[data-index="${idx}"]`);
     const changeEl = document.querySelector(`.payment-row__change[data-index="${idx}"]`);
-    if (!receivedEl || !changeEl) return;
+    if (!receivedEl || !changeEl) {
+      return;
+    }
     const amount = parseFloat(this.payments[idx]?.amount) || 0;
     const received = parseFloat(receivedEl.value) || 0;
     const change = Math.max(0, received - amount);
@@ -556,60 +961,52 @@ class POS {
     changeEl.className = 'payment-row__change' + (change > 0 ? ' has-change' : '');
   }
 
-  async confirmSale() {
-    if (this._isProcessing) return;
+  _validateSale() {
+    if (this._isProcessing) {
+      return 'already_processing';
+    }
     if (this.cart.length === 0) {
-      Toast.error('Error', 'El carrito está vacío');
-      return;
+      return 'empty_cart';
     }
-
     if (!cashService.currentSession) {
-      Toast.error('Error', 'No hay una sesión de caja abierta');
-      return;
+      return 'no_session';
     }
 
-    const subtotal = this.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const discountAmount = this.discountType === 'percent'
-      ? subtotal * (this.discount / 100)
-      : this.discount;
-    const total = subtotal - discountAmount;
-
+    const { total } = this._getTotal();
     const validation = validatePayments(this.payments, total);
     if (!validation.valid) {
-      Toast.error('Error', validation.error);
-      return;
+      return validation.error;
     }
 
     const accountPayment = this.payments.find(p => p.method === 'account');
     if (accountPayment && accountPayment.amount > 0) {
       if (!this.currentCustomer) {
-        Toast.error('Error', 'Seleccioná un cliente para usar cuenta corriente');
-        return;
-      }
-      const balance = this.currentCustomer.balance || 0;
-      if (balance < accountPayment.amount) {
-        Toast.error('Error', 'Saldo insuficiente en la cuenta corriente');
-        return;
+        return 'account_no_customer';
       }
     }
 
+    for (const item of this.cart) {
+      const product = this.products.find(p => p.id === item.id);
+      if (product && product.stock < item.quantity) {
+        return `stock:${item.name}:${product.stock}`;
+      }
+    }
+
+    return null;
+  }
+
+  _buildSaleObject(saleId, totals) {
+    const { subtotal, discountAmount, taxAmount, total } = totals;
     const primaryMethod = this.payments[0]?.method || 'cash';
     const cashPayment = this.payments.find(p => p.method === 'cash');
-    const cashReceived = cashPayment ? (parseFloat(cashPayment._received) || cashPayment.amount) : 0;
+    const cashReceived = cashPayment ? parseFloat(cashPayment._received) || cashPayment.amount : 0;
     const change = cashPayment ? Math.max(0, cashReceived - cashPayment.amount) : 0;
 
-    this._isProcessing = true;
-    const confirmBtn = document.getElementById('confirm-sale-btn');
-    if (confirmBtn) {
-      confirmBtn.disabled = true;
-      confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Procesando...';
-    }
-
-    const sale = {
-      id: `sale_${Date.now()}`,
+    return {
+      id: saleId,
       date: new Date().toISOString(),
       sessionId: cashService.currentSession?.id,
-      customerId: this.currentCustomer ? this.currentCustomer.id : null,
+      customerId: this.currentCustomer ? this.currentCustomer.id : 'cust_final',
       items: this.cart.map(item => ({
         productId: item.id,
         name: item.name,
@@ -619,7 +1016,7 @@ class POS {
       })),
       subtotal,
       discount: discountAmount,
-      tax: 0,
+      tax: taxAmount,
       total,
       paymentMethod: primaryMethod,
       paymentType: this.payments.length > 1 ? 'COMBINADO' : 'SIMPLE',
@@ -631,36 +1028,90 @@ class POS {
       change: cashPayment ? change : null,
       userId: state.get('currentUser')?.id
     };
+  }
+
+  async confirmSale() {
+    const error = this._validateSale();
+    if (error) {
+      const messages = {
+        already_processing: null,
+        empty_cart: 'El carrito está vacío',
+        no_session: 'No hay una sesión de caja abierta',
+        account_no_customer: 'Seleccioná un cliente para usar cuenta corriente',
+        account_insufficient: 'Saldo insuficiente en la cuenta corriente'
+      };
+      if (error.startsWith('stock:')) {
+        const [, name, stock] = error.split(':');
+        Toast.error('Sin stock', `${name} solo tiene ${stock} unidades`);
+      } else if (messages[error] !== undefined && messages[error] !== null) {
+        Toast.error('Error', messages[error]);
+      }
+      return;
+    }
+
+    this._isProcessing = true;
+    const confirmBtn = document.getElementById('confirm-sale-btn');
+    if (confirmBtn) {
+      confirmBtn.disabled = true;
+      confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Procesando...';
+    }
+
+    const saleId = await generateSaleId();
+    const sale = this._buildSaleObject(saleId, this._getTotal());
 
     try {
       await saleRepo.create(sale);
 
-      for (const item of sale.items) {
-        await saleItemRepo.create({
-          id: `si_${Date.now()}_${item.productId}`,
-          saleId: sale.id,
-          productId: item.productId,
-          quantity: item.quantity,
-          price: item.price,
-          subtotal: item.subtotal
-        });
+      const stockUpdates = [];
+      let previousBalance = null;
+      let previousBalanceCustomer = null;
+      try {
+        for (const [index, item] of sale.items.entries()) {
+          await saleItemRepo.create({
+            id: `SI-${sale.id}-${String(index + 1).padStart(3, '0')}`,
+            saleId: sale.id,
+            productId: item.productId,
+            quantity: item.quantity,
+            price: item.price,
+            subtotal: item.subtotal
+          });
 
-        const product = this.products.find(p => p.id === item.productId);
-        if (product) {
-          product.stock -= item.quantity;
-          await productRepo.update(product);
+          const product = this.products.find(p => p.id === item.productId);
+          if (product && !product.variablePrice) {
+            product.stock -= item.quantity;
+            stockUpdates.push(product);
+            await productRepo.update(product);
+          }
         }
+
+        const accountPayment = this.payments.find(p => p.method === 'account');
+        if (accountPayment && accountPayment.amount > 0 && this.currentCustomer) {
+          previousBalance = this.currentCustomer.balance;
+          previousBalanceCustomer = this.currentCustomer;
+          this.currentCustomer.balance = (this.currentCustomer.balance || 0) + accountPayment.amount;
+          await customerRepo.update(this.currentCustomer);
+        }
+
+        await cashService.recordSale(sale);
+      } catch (innerError) {
+        for (const product of stockUpdates) {
+          const original = sale.items.find(i => i.productId === product.id);
+          if (original) {
+            product.stock += original.quantity;
+            await productRepo.update(product).catch(() => {});
+          }
+        }
+        if (previousBalanceCustomer && previousBalance !== null) {
+          previousBalanceCustomer.balance = previousBalance;
+          await customerRepo.update(previousBalanceCustomer).catch(() => {});
+        }
+        await saleRepo.delete(sale.id).catch(() => {});
+        throw innerError;
       }
+      state.set('sale:created', { ...sale });
+      state.emit('data:sales-changed');
 
-      const accountPayment = this.payments.find(p => p.method === 'account');
-      if (accountPayment && accountPayment.amount > 0 && this.currentCustomer) {
-        this.currentCustomer.balance = (this.currentCustomer.balance || 0) - accountPayment.amount;
-        await customerRepo.update(this.currentCustomer);
-      }
-
-      await cashService.recordSale(sale);
-
-      Toast.success('Éxito', `Venta #${sale.id.substring(0, 8)} confirmada`);
+      Toast.success('Éxito', `Venta ${sale.id} confirmada`);
       this.showTicket(sale);
       this.cart = [];
       this.currentCustomer = null;
@@ -669,7 +1120,7 @@ class POS {
       this.renderCart();
       this.renderCustomerSelect();
     } catch (error) {
-      console.error('Error saving sale:', error);
+      logger.error('POS', 'Error saving sale', error);
       Toast.error('Error', 'No se pudo guardar la venta');
     } finally {
       this._isProcessing = false;
@@ -688,9 +1139,18 @@ class POS {
 
   _injectCashButton() {
     const header = document.querySelector('.pos-cart-header');
-    if (!header) return;
+    if (!header) {
+      return;
+    }
     const existing = document.getElementById('pos-cash-btn');
-    if (existing) existing.remove();
+    if (existing) {
+      existing.style.display = '';
+      if (!existing._cashHandlerAttached) {
+        existing._cashHandlerAttached = true;
+        existing.addEventListener('click', () => cash.showQuickCashModal());
+      }
+      return;
+    }
 
     const btn = document.createElement('button');
     btn.id = 'pos-cash-btn';
@@ -698,154 +1158,9 @@ class POS {
     btn.innerHTML = '<i class="fa-solid fa-cash-register"></i>';
     btn.title = 'Gestión de Caja';
     btn.setAttribute('aria-label', 'Gestión de Caja');
+    btn._cashHandlerAttached = true;
     header.appendChild(btn);
-
-    btn.onclick = () => this.showCashModal();
-  }
-
-  showCashModal() {
-    if (!cashService.currentSession) {
-      Toast.error('Error', 'No hay sesión de caja abierta');
-      return;
-    }
-
-    const body = `
-      <div style="margin-bottom:var(--space-4);">
-        <label class="form-label">Tipo de operación</label>
-        <select class="form-input" id="cash-op-type">
-          <option value="in">Ingreso Manual</option>
-          <option value="out">Egreso Manual</option>
-          <option value="close">Cierre de Caja</option>
-        </select>
-      </div>
-      <div id="cash-op-dynamic">
-        <div class="form-group">
-          <label class="form-label">Monto</label>
-          <input type="number" class="form-input" id="cash-op-amount" min="0" step="0.01" placeholder="0.00">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Observación <span style="color:var(--color-text-muted);font-weight:var(--font-normal);">(opcional)</span></label>
-          <input type="text" class="form-input" id="cash-op-obs" placeholder="Motivo del movimiento">
-        </div>
-      </div>
-    `;
-
-    const footer = `
-      <button class="btn btn-secondary" id="cash-modal-close-btn">Cerrar</button>
-      <button class="btn btn-primary" id="cash-modal-exec-btn">Ejecutar</button>
-    `;
-
-    Modal.show({
-      title: 'Gestión de Caja',
-      body,
-      footer
-    });
-
-    document.getElementById('cash-modal-close-btn').onclick = () => Modal.close();
-
-    document.getElementById('cash-op-type').onchange = (e) => {
-      const dynamic = document.getElementById('cash-op-dynamic');
-      if (e.target.value === 'close') {
-        dynamic.innerHTML = '<div style="text-align:center;padding:var(--space-4);"><i class="fa-solid fa-spinner fa-spin" style="font-size:24px;"></i><p style="margin-top:var(--space-2);">Cargando resumen...</p></div>';
-        this._loadCloseSummary();
-      } else {
-        dynamic.innerHTML = `
-          <div class="form-group">
-            <label class="form-label">Monto</label>
-            <input type="number" class="form-input" id="cash-op-amount" min="0" step="0.01" placeholder="0.00">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Observación <span style="color:var(--color-text-muted);font-weight:var(--font-normal);">(opcional)</span></label>
-            <input type="text" class="form-input" id="cash-op-obs" placeholder="Motivo del movimiento">
-          </div>
-        `;
-      }
-    };
-
-    document.getElementById('cash-modal-exec-btn').onclick = async () => {
-      const type = document.getElementById('cash-op-type')?.value;
-      if (type === 'close') {
-        await this._executeClose();
-        return;
-      }
-      const amount = document.getElementById('cash-op-amount')?.value;
-      const obs = document.getElementById('cash-op-obs')?.value || '';
-      if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
-        Toast.error('Error', 'Ingresá un monto válido');
-        return;
-      }
-      try {
-        await cashService.addMovement(type, amount, obs);
-        const label = type === 'in' ? 'Ingreso' : 'Egreso';
-        Toast.success('Éxito', `${label} registrado correctamente`);
-        Modal.close();
-      } catch (err) {
-        Toast.error('Error', err.message);
-      }
-    };
-  }
-
-  async _loadCloseSummary() {
-    const summary = await cashService.getSessionSummary();
-    if (!summary) {
-      document.getElementById('cash-op-dynamic').innerHTML = '<p style="color:var(--color-danger);">Error al cargar resumen</p>';
-      return;
-    }
-
-    const dynamic = document.getElementById('cash-op-dynamic');
-    const s = summary;
-    dynamic.innerHTML = `
-      <div class="cash-summary">
-        <div class="cash-summary__header">
-          <div><span class="cash-summary__label">Apertura</span><span class="cash-summary__value">${new Date(s.session.openedAt).toLocaleString('es-AR')}</span></div>
-          <div><span class="cash-summary__label">Responsable</span><span class="cash-summary__value">${s.session.userName || 'N/A'}</span></div>
-        </div>
-        <div class="cash-summary__divider"></div>
-        <div class="cash-summary__row"><span>Monto Inicial</span><span>${format(s.initialAmount)}</span></div>
-        <div class="cash-summary__row"><span>Ingresos Manuales</span><span style="color:var(--color-success);">+${format(s.manualIn)}</span></div>
-        <div class="cash-summary__row"><span>Egresos Manuales</span><span style="color:var(--color-danger);">-${format(s.manualOut)}</span></div>
-        <div class="cash-summary__divider"></div>
-        <div class="cash-summary__row"><span>Ventas Efectivo</span><span>${format(s.cashSales)}</span></div>
-        <div class="cash-summary__row"><span>Ventas Transferencia</span><span>${format(s.transferSales)}</span></div>
-        <div class="cash-summary__row"><span>Ventas Débito</span><span>${format(s.debitSales)}</span></div>
-        <div class="cash-summary__row"><span>Ventas Cuenta Corriente</span><span>${format(s.accountSales)}</span></div>
-        <div class="cash-summary__row cash-summary__total"><span>Total Ventas</span><span>${format(s.totalSales)}</span></div>
-        <div class="cash-summary__divider"></div>
-        <div class="cash-summary__row cash-summary__expected"><span>Total Esperado en Efectivo</span><span>${format(s.expectedTotal)}</span></div>
-        <div style="margin-top:var(--space-4);">
-          <label class="form-label">Monto Real Contado</label>
-          <input type="number" class="form-input form-input-lg" id="close-final-amount" min="0" step="0.01" placeholder="0.00" style="font-size:var(--text-lg);font-weight:var(--font-bold);">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Observación <span style="color:var(--color-text-muted);font-weight:var(--font-normal);">(opcional)</span></label>
-          <input type="text" class="form-input" id="close-observation" placeholder="Motivo del cierre">
-        </div>
-      </div>
-    `;
-  }
-
-  async _executeClose() {
-    const finalAmount = document.getElementById('close-final-amount')?.value;
-    const observation = document.getElementById('close-observation')?.value || '';
-    if (!finalAmount || isNaN(parseFloat(finalAmount)) || parseFloat(finalAmount) < 0) {
-      Toast.error('Error', 'Ingresá un monto final válido');
-      return;
-    }
-    try {
-      await cashService.closeSession(finalAmount, observation);
-      const expected = parseFloat(document.querySelector('.cash-summary__expected span:last-child')?.textContent?.replace(/[^\d.-]/g, '') || '0');
-      const diff = parseFloat(finalAmount) - expected;
-      const absDiff = Math.abs(diff);
-      if (absDiff > 0.01) {
-        Toast.warning('Caja Cerrada', `Diferencia: ${format(diff)}`);
-      } else {
-        Toast.success('Caja Cerrada', 'Cierre exitoso. Diferencia: $0.00');
-      }
-      Modal.close();
-      setTimeout(() => cashService.requireActiveSession(), 800);
-    } catch (err) {
-      Toast.error('Error', err.message);
-    }
+    btn.addEventListener('click', () => cash.showQuickCashModal());
   }
 }
 

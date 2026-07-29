@@ -1,7 +1,7 @@
 'use strict';
 
 const DB_NAME = 'pos_premium_db';
-const DB_VERSION = 2;
+const DB_VERSION = 4;
 
 const STORES = {
   products: {
@@ -22,9 +22,7 @@ const STORES = {
   customers: {
     keyPath: 'id',
     autoIncrement: false,
-    indexes: [
-      { name: 'phone', keyPath: 'phone', unique: false }
-    ]
+    indexes: [{ name: 'phone', keyPath: 'phone', unique: false }]
   },
   sales: {
     keyPath: 'id',
@@ -45,16 +43,12 @@ const STORES = {
   cash_sessions: {
     keyPath: 'id',
     autoIncrement: false,
-    indexes: [
-      { name: 'openedAt', keyPath: 'openedAt' }
-    ]
+    indexes: [{ name: 'openedAt', keyPath: 'openedAt' }]
   },
   cash_movements: {
     keyPath: 'id',
     autoIncrement: false,
-    indexes: [
-      { name: 'sessionId', keyPath: 'sessionId' }
-    ]
+    indexes: [{ name: 'sessionId', keyPath: 'sessionId' }]
   },
   settings: {
     keyPath: 'key',
@@ -64,9 +58,7 @@ const STORES = {
   users: {
     keyPath: 'id',
     autoIncrement: false,
-    indexes: [
-      { name: 'username', keyPath: 'username', unique: true }
-    ]
+    indexes: [{ name: 'username', keyPath: 'username', unique: true }]
   },
   notifications: {
     keyPath: 'id',
@@ -75,6 +67,32 @@ const STORES = {
       { name: 'date', keyPath: 'date' },
       { name: 'read', keyPath: 'read' }
     ]
+  },
+  cash_closures: {
+    keyPath: 'id',
+    autoIncrement: false,
+    indexes: [
+      { name: 'sessionId', keyPath: 'sessionId' },
+      { name: 'closedAt', keyPath: 'closedAt' }
+    ]
+  },
+  backup_snapshots: {
+    keyPath: 'id',
+    autoIncrement: false,
+    indexes: [
+      { name: 'createdAt', keyPath: 'createdAt' },
+      { name: 'type', keyPath: 'type' }
+    ]
+  },
+  counters: {
+    keyPath: 'id',
+    autoIncrement: false,
+    indexes: []
+  },
+  payment_methods: {
+    keyPath: 'id',
+    autoIncrement: false,
+    indexes: []
   }
 };
 
@@ -87,8 +105,9 @@ class IndexedDBWrapper {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-      request.onupgradeneeded = (event) => {
+      request.onupgradeneeded = event => {
         const db = event.target.result;
+        const transaction = event.target.transaction;
 
         Object.entries(STORES).forEach(([storeName, config]) => {
           if (!db.objectStoreNames.contains(storeName)) {
@@ -101,7 +120,6 @@ class IndexedDBWrapper {
               store.createIndex(index.name, index.keyPath, { unique: index.unique || false });
             });
           } else {
-            const transaction = event.target.transaction;
             const existingStore = transaction.objectStore(storeName);
             const existingIndexes = Array.from(existingStore.indexNames);
 
@@ -114,12 +132,46 @@ class IndexedDBWrapper {
         });
       };
 
-      request.onsuccess = (event) => {
+      request.onsuccess = event => {
         this.db = event.target.result;
-        resolve(this.db);
+
+        const missingStores = [];
+        Object.keys(STORES).forEach(storeName => {
+          if (!this.db.objectStoreNames.contains(storeName)) {
+            missingStores.push(storeName);
+          }
+        });
+
+        if (missingStores.length > 0) {
+          const newVersion = this.db.version + 1;
+          this.db.close();
+          const retry = indexedDB.open(DB_NAME, newVersion);
+          retry.onupgradeneeded = e => {
+            const upgDb = e.target.result;
+            missingStores.forEach(storeName => {
+              if (!upgDb.objectStoreNames.contains(storeName)) {
+                const config = STORES[storeName];
+                const store = upgDb.createObjectStore(storeName, {
+                  keyPath: config.keyPath,
+                  autoIncrement: config.autoIncrement
+                });
+                config.indexes.forEach(idx => {
+                  store.createIndex(idx.name, idx.keyPath, { unique: idx.unique || false });
+                });
+              }
+            });
+          };
+          retry.onsuccess = e => {
+            this.db = e.target.result;
+            resolve(this.db);
+          };
+          retry.onerror = e => reject(e.target.error);
+        } else {
+          resolve(this.db);
+        }
       };
 
-      request.onerror = (event) => {
+      request.onerror = event => {
         reject(event.target.error);
       };
     });
@@ -182,6 +234,35 @@ class IndexedDBWrapper {
 
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
+    });
+  }
+
+  async putAll(storeName, items) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(storeName, 'readwrite');
+      const store = transaction.objectStore(storeName);
+      let error = null;
+
+      items.forEach(item => {
+        const req = store.put(item);
+        req.onerror = () => {
+          error = req.error;
+        };
+      });
+
+      transaction.oncomplete = () => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      };
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => {
+        if (error) {
+          reject(error);
+        }
+      };
     });
   }
 

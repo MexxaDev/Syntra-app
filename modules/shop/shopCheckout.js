@@ -3,6 +3,7 @@
 import ShopCart from './shopCart.js';
 import ShopWhatsApp from './shopWhatsApp.js';
 import ShopUI from './shopUI.js';
+import { escapeHtml } from '../../utils/sanitizer.js';
 
 class ShopCheckout {
   constructor() {
@@ -16,13 +17,15 @@ class ShopCheckout {
 
   showToast(message, type = 'info') {
     const existing = document.querySelector('.shop-toast');
-    if (existing) existing.remove();
+    if (existing) {
+      existing.remove();
+    }
 
     const toast = document.createElement('div');
     toast.className = `shop-toast shop-toast-${type}`;
     toast.innerHTML = `
       <i class="fa-solid fa-${type === 'success' ? 'check' : 'exclamation'}-circle"></i>
-      <span>${message}</span>
+      <span>${escapeHtml(message)}</span>
     `;
 
     document.body.appendChild(toast);
@@ -75,7 +78,7 @@ class ShopCheckout {
       this.closeModal();
     });
 
-    form?.addEventListener('submit', (e) => {
+    form?.addEventListener('submit', e => {
       e.preventDefault();
       this.handleSubmit();
     });
@@ -155,13 +158,15 @@ class ShopCheckout {
 
   showError(message) {
     const existing = document.querySelector('.shop-error-toast');
-    if (existing) existing.remove();
+    if (existing) {
+      existing.remove();
+    }
 
     const toast = document.createElement('div');
     toast.className = 'shop-error-toast';
     toast.innerHTML = `
       <i class="fa-solid fa-exclamation-circle"></i>
-      <span>${message}</span>
+      <span>${escapeHtml(message)}</span>
     `;
 
     document.getElementById('shop-modal-body').appendChild(toast);
@@ -250,7 +255,7 @@ class ShopCheckout {
         <div style="padding: var(--space-4) var(--space-6);">
           <textarea class="shop-form-textarea" id="shop-product-note"
                     placeholder="Ej: sin cebolla, término medio..."
-                    style="min-height: 100px;">${currentNote}</textarea>
+                    style="min-height: 100px;">${escapeHtml(currentNote)}</textarea>
           <div style="display:flex;gap:var(--space-3);margin-top:var(--space-4);">
             <button class="shop-btn-back" id="shop-cancel-note" style="flex:1;">Cancelar</button>
             <button class="shop-btn-confirm" id="shop-save-note" style="flex:1;">Guardar</button>
@@ -292,7 +297,9 @@ class ShopCheckout {
     const modalBody = document.getElementById('shop-modal-body');
 
     cartBtn?.addEventListener('click', () => {
-      if (ShopCart.isEmpty()) return;
+      if (ShopCart.isEmpty()) {
+        return;
+      }
 
       modalBody.innerHTML = ShopUI.renderCartModal();
       modal.classList.add('active');

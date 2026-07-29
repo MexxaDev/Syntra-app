@@ -26,14 +26,6 @@
     font-size: var(--text-lg);
   }
 
-  .dashboard-stats {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .dashboard-grid {
-    grid-template-columns: 1fr;
-  }
-
   .pos-layout {
     grid-template-columns: 1fr;
     height: auto;
@@ -55,7 +47,7 @@
     padding: var(--space-4);
     background: var(--color-surface);
     border-top: 1px solid var(--color-border);
-    box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08);
   }
 
   .pos-cart-header {
@@ -70,10 +62,6 @@
     padding-top: var(--space-2);
   }
 
-  .header-search {
-    width: 240px;
-  }
-
   .settings-grid {
     grid-template-columns: 1fr;
   }
@@ -84,8 +72,8 @@
   .app {
     grid-template-columns: 1fr;
     grid-template-areas:
-      "header"
-      "main";
+      'header'
+      'main';
   }
 
   .sidebar {
@@ -131,21 +119,21 @@
     font-size: var(--text-base);
   }
 
-  .header-search {
-    display: none;
-  }
-
   .header-left {
     gap: var(--space-2);
-  }
-
-  .dashboard-stats {
-    grid-template-columns: 1fr;
   }
 
   .pos-product-grid {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: var(--space-1-5);
+  }
+
+  .pos-product-card {
+    min-height: 160px;
+  }
+
+  .pos-product-card__image {
+    height: 70px;
   }
 
   .pos-cart {
@@ -195,10 +183,6 @@
     padding: var(--space-4);
   }
 
-  .stat-card__value {
-    font-size: var(--text-2xl);
-  }
-
   .pos-cart {
     left: 0;
     max-height: 60vh;
@@ -206,8 +190,21 @@
   }
 
   .pos-product-grid {
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: var(--space-1-5);
+  }
+
+  .pos-product-card {
+    min-height: 150px;
+  }
+
+  .pos-product-card__image {
+    height: 65px;
+  }
+
+  .pos-product-card__name {
+    font-size: var(--text-xs);
+    -webkit-line-clamp: 2;
   }
 
   .pos-cart-item {
@@ -227,7 +224,15 @@
   }
 
   .pos-product-grid {
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  }
+
+  .pos-product-card {
+    min-height: 200px;
+  }
+
+  .pos-product-card__image {
+    height: 90px;
   }
 }
 
@@ -287,7 +292,7 @@
 
   .app {
     grid-template-columns: 1fr;
-    grid-template-areas: "main";
+    grid-template-areas: 'main';
   }
 
   .card,
@@ -295,9 +300,4 @@
     box-shadow: none;
     border: 1px solid #ddd;
   }
-}
-
-/* ===== DARK MODE (Future) ===== */
-@media (prefers-color-scheme: dark) {
-  /* Reserved for future dark mode implementation */
 }

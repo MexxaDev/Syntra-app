@@ -4,40 +4,61 @@ import { customerRepo, saleRepo } from '../../db/repositories.js';
 import Modal from '../../components/modal.js';
 import Toast from '../../components/toast.js';
 import { validateCustomer } from '../../utils/validators.js';
+import { escapeHtml } from '../../utils/sanitizer.js';
+import { format } from '../../utils/currency.js';
+import { logger } from '../../utils/logger.js';
+import state from '../../js/state.js';
 
 class Customers {
   constructor() {
     this.customers = [];
+    this._pageSize = 20;
+    this._currentPage = 1;
+  }
+
+  get _totalPages() {
+    return Math.max(1, Math.ceil(this.customers.length / this._pageSize));
+  }
+
+  get _pageData() {
+    const start = (this._currentPage - 1) * this._pageSize;
+    return this.customers.slice(start, start + this._pageSize);
   }
 
   async load() {
     const container = document.getElementById('customers-content') || document.getElementById('customers');
     if (container) {
-      container.innerHTML = '<div style="text-align:center;padding:var(--space-8);color:var(--color-text-secondary);"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;margin-bottom:var(--space-3);display:block;"></i>Cargando clientes...</div>';
+      container.innerHTML =
+        '<div style="text-align:center;padding:var(--space-8);color:var(--color-text-secondary);"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;margin-bottom:var(--space-3);display:block;"></i>Cargando clientes...</div>';
     }
-    this.customers = await customerRepo.findAll();
-    this.render();
+    try {
+      this.customers = await customerRepo.findAll();
+      this.render();
+    } catch (error) {
+      logger.error('Customers', 'Error loading customers:', error);
+      Toast.error('Error', 'No se pudieron cargar los clientes');
+      if (container) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state__icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+            <h3 class="empty-state__title">Error al cargar</h3>
+            <p class="empty-state__description">No se pudieron cargar los clientes.</p>
+            <button class="btn btn-sm btn-primary" id="retry-customers">Reintentar</button>
+          </div>
+        `;
+        document.getElementById('retry-customers')?.addEventListener('click', () => this.load());
+      }
+    }
   }
 
   render() {
-    const container = document.getElementById('customers') || document.getElementById('customers-content');
-    if (!container) return;
-
-    let listContainer = container.querySelector('#customers-list') || container.querySelector('.table-container');
-
-    if (!listContainer) {
-      if (container.id === 'customers-content') {
-        listContainer = container;
-      } else {
-        const div = document.createElement('div');
-        div.id = 'customers-list';
-        container.appendChild(div);
-        listContainer = div;
-      }
+    const container = document.getElementById('customers-content');
+    if (!container) {
+      return;
     }
 
     if (this.customers.length === 0) {
-      listContainer.innerHTML = `
+      container.innerHTML = `
         <div class="empty-state">
           <div class="empty-state__icon"><i class="fa-solid fa-users"></i></div>
           <h3 class="empty-state__title">No hay clientes</h3>
@@ -70,19 +91,24 @@ class Customers {
           <tbody>
     `;
 
-    this.customers.forEach((customer, index) => {
+    const customers = this._pageData;
+    const offset = (this._currentPage - 1) * this._pageSize;
+
+    customers.forEach((customer, i) => {
+      const index = offset + i;
       const saldo = parseFloat(customer.balance) || 0;
+      const isDefault = customer.id === 'cust_final' || customer.isDefault;
       html += `
         <tr data-index="${index}">
-          <td>${customer.name}</td>
-          <td>${customer.phone || '-'}</td>
-          <td>${customer.address || '-'}</td>
-          <td style="font-weight:var(--font-semibold);">$${saldo.toFixed(2)}</td>
+          <td>${escapeHtml(customer.name)}${isDefault ? ' <span class="badge badge-info" style="font-size:0.7em;">Sistema</span>' : ''}</td>
+          <td>${escapeHtml(customer.phone || '-')}</td>
+          <td>${escapeHtml(customer.address || '-')}</td>
+          <td style="font-weight:var(--font-semibold);${saldo > 0 ? 'color:var(--color-danger);' : ''}">${format(saldo)}</td>
           <td>
             <div class="flex gap-2">
-              <button class="btn btn-sm btn-ghost" data-action="add-balance" data-index="${index}">+ Saldo</button>
-              <button class="btn btn-sm btn-ghost" data-action="edit" data-index="${index}">Editar</button>
-              <button class="btn btn-sm btn-danger" data-action="delete" data-index="${index}">Eliminar</button>
+              ${!isDefault ? `<button class="btn btn-sm btn-ghost" data-action="pay-balance" data-index="${index}"><i class="fa-solid fa-credit-card"></i> Pagar</button>` : ''}
+              ${!isDefault ? `<button class="btn btn-sm btn-ghost" data-action="edit" data-index="${index}">Editar</button>` : ''}
+              ${!isDefault ? `<button class="btn btn-sm btn-danger" data-action="delete" data-index="${index}">Eliminar</button>` : ''}
             </div>
           </td>
         </tr>
@@ -95,20 +121,65 @@ class Customers {
       </div>
     `;
 
-    listContainer.innerHTML = html;
+    if (this._totalPages > 1) {
+      const cp = this._currentPage;
+      const tp = this._totalPages;
+      let pages = '';
+      const btn = (p, label = p, cls = '') =>
+        `<button class="pagination-btn ${cls}${p === cp ? ' pagination-btn--active' : ''}" data-customer-page="${p}">${label}</button>`;
+
+      if (tp <= 7) {
+        for (let i = 1; i <= tp; i++) {
+          pages += btn(i);
+        }
+      } else {
+        pages += btn(1);
+        if (cp > 3) {
+          pages += '<span class="pagination-ellipsis">...</span>';
+        }
+        const s = Math.max(2, cp - 1);
+        const e = Math.min(tp - 1, cp + 1);
+        for (let i = s; i <= e; i++) {
+          pages += btn(i);
+        }
+        if (cp < tp - 2) {
+          pages += '<span class="pagination-ellipsis">...</span>';
+        }
+        pages += btn(tp);
+      }
+
+      html += `<div class="pagination">${btn(cp - 1, '‹', 'pagination-btn--prev')}${pages}${btn(cp + 1, '›', 'pagination-btn--next')}</div>`;
+    }
+
+    container.innerHTML = html;
 
     document.getElementById('add-customer-btn')?.addEventListener('click', () => this.openModal());
-    document.getElementById('customer-search')?.addEventListener('input', (e) => this.search(e.target.value));
+    document.getElementById('customer-search')?.addEventListener('input', e => this.search(e.target.value));
 
-    listContainer.querySelectorAll('[data-action]').forEach(btn => {
+    container.querySelectorAll('[data-customer-page]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const page = parseInt(btn.dataset.customerPage);
+        if (!page || page < 1 || page > this._totalPages) {
+          return;
+        }
+        this._currentPage = page;
+        this.render();
+      });
+    });
+
+    container.querySelectorAll('[data-action]').forEach(btn => {
       btn.addEventListener('click', () => {
         const action = btn.dataset.action;
         const index = parseInt(btn.dataset.index);
         const customer = this.customers[index];
 
-        if (action === 'edit') this.openModal(customer);
-        else if (action === 'delete') this.deleteCustomer(customer.id);
-        else if (action === 'add-balance') this.openAddBalance(customer);
+        if (action === 'edit') {
+          this.openModal(customer);
+        } else if (action === 'delete') {
+          this.deleteCustomer(customer.id);
+        } else if (action === 'pay-balance') {
+          this.openPayBalance(customer);
+        }
       });
     });
   }
@@ -118,14 +189,19 @@ class Customers {
       this.render();
       return;
     }
-    const filtered = this.customers.filter(c =>
-      c.name.toLowerCase().includes(query.toLowerCase()) ||
-      (c.phone && c.phone.includes(query))
+    const filtered = this.customers.filter(
+      c => c.name.toLowerCase().includes(query.toLowerCase()) || (c.phone && c.phone.includes(query))
     );
+    this._currentPage = 1;
     const prevData = this.customers;
     this.customers = filtered;
     this.render();
     this.customers = prevData;
+    const searchInput = document.getElementById('customer-search');
+    if (searchInput) {
+      searchInput.value = query;
+      searchInput.focus();
+    }
   }
 
   openModal(customer = null) {
@@ -134,16 +210,16 @@ class Customers {
 
     const body = `
       <div class="form-group">
-        <label class="form-label">Nombre</label>
-        <input type="text" class="form-input" id="cust-name" value="${customer ? customer.name : ''}" required>
+        <label class="form-label" for="cust-name">Nombre</label>
+        <input type="text" class="form-input" id="cust-name" value="${escapeHtml(customer ? customer.name : '')}" required>
       </div>
       <div class="form-group">
-        <label class="form-label">Teléfono</label>
-        <input type="text" class="form-input" id="cust-phone" value="${customer ? customer.phone : ''}">
+        <label class="form-label" for="cust-phone">Teléfono</label>
+        <input type="text" class="form-input" id="cust-phone" value="${escapeHtml(customer ? customer.phone : '')}">
       </div>
       <div class="form-group">
-        <label class="form-label">Dirección</label>
-        <input type="text" class="form-input" id="cust-address" value="${customer ? customer.address : ''}">
+        <label class="form-label" for="cust-address">Dirección</label>
+        <input type="text" class="form-input" id="cust-address" value="${escapeHtml(customer ? customer.address : '')}">
       </div>
     `;
 
@@ -174,13 +250,16 @@ class Customers {
         } else {
           await customerRepo.create({
             id: `cust_${Date.now()}`,
-            name, phone, address,
+            name,
+            phone,
+            address,
             balance: 0,
             createdAt: new Date().toISOString()
           });
           Toast.success('Éxito', 'Cliente creado');
         }
         Modal.close();
+        state.emit('data:customers-changed');
         this.load();
       } catch (error) {
         Toast.error('Error', 'No se pudo guardar el cliente');
@@ -188,24 +267,25 @@ class Customers {
     });
   }
 
-  openAddBalance(customer) {
+  openPayBalance(customer) {
+    const currentBalance = customer.balance || 0;
     const body = `
       <div style="margin-bottom:var(--space-3);">
         <strong>${customer.name}</strong><br>
-        <span style="color:var(--color-text-secondary);font-size:var(--text-sm);">Saldo actual: $${(customer.balance || 0).toFixed(2)}</span>
+        <span style="color:var(--color-text-secondary);font-size:var(--text-sm);">Deuda actual: ${format(currentBalance)}</span>
       </div>
       <div class="form-group">
-        <label class="form-label">Monto a agregar</label>
-        <input type="number" class="form-input" id="balance-amount" min="0" step="0.01" placeholder="0.00">
+        <label class="form-label" for="balance-amount">Monto a pagar</label>
+        <input type="number" class="form-input" id="balance-amount" min="0" step="0.01" placeholder="0.00" max="${currentBalance}">
       </div>
     `;
 
     const footer = `
       <button class="btn btn-secondary" id="bal-cancel">Cancelar</button>
-      <button class="btn btn-primary" id="bal-save">Agregar</button>
+      <button class="btn btn-primary" id="bal-save">Pagar</button>
     `;
 
-    Modal.show({ title: 'Agregar Saldo', body, footer });
+    Modal.show({ title: 'Registrar pago', body, footer });
 
     document.getElementById('bal-cancel').addEventListener('click', () => Modal.close());
 
@@ -217,18 +297,25 @@ class Customers {
       }
 
       try {
-        customer.balance = (customer.balance || 0) + amount;
-        await customerRepo.update(customer);
-        Toast.success('Éxito', `Se agregaron $${amount.toFixed(2)} al saldo`);
+        const newBalance = Math.max(0, currentBalance - amount);
+        await customerRepo.update({ ...customer, balance: newBalance });
+        customer.balance = newBalance;
+        Toast.success('Éxito', `Pago registrado: ${format(amount)}`);
         Modal.close();
+        state.emit('data:customers-changed');
         this.load();
       } catch (error) {
-        Toast.error('Error', 'No se pudo actualizar el saldo');
+        Toast.error('Error', 'No se pudo registrar el pago');
       }
     });
   }
 
   async deleteCustomer(id) {
+    if (id === 'cust_final') {
+      Toast.error('Error', 'No se puede eliminar el cliente por defecto');
+      return;
+    }
+
     Modal.show({
       title: 'Confirmar Eliminación',
       body: '<p>¿Estás seguro de eliminar este cliente?</p>',
@@ -249,6 +336,7 @@ class Customers {
         await customerRepo.delete(id);
         Toast.success('Éxito', 'Cliente eliminado');
         Modal.close();
+        state.emit('data:customers-changed');
         this.load();
       } catch (error) {
         Toast.error('Error', 'No se pudo eliminar el cliente');

@@ -1,6 +1,8 @@
 'use strict';
 
 import state from './state.js';
+import { logger } from '../utils/logger.js';
+import { hasRoutePermission, getDefaultRoute } from '../config/permissions.js';
 
 class Router {
   constructor() {
@@ -13,7 +15,9 @@ class Router {
       'sales',
       'cash',
       'reports',
-      'settings'
+      'settings',
+      'users',
+      'payment-methods'
     ];
     this.publicRoutes = ['shop'];
   }
@@ -25,18 +29,31 @@ class Router {
 
   handleRoute() {
     let hash = window.location.hash.slice(1) || 'dashboard';
-
-    state.set('currentRoute', hash);
+    const user = state.get('currentUser');
+    const role = user ? user.role : null;
 
     if (this.publicRoutes.includes(hash)) {
+      state.set('currentRoute', hash);
       this.showPublicRoute(hash);
-    } else {
-      if (!this.privateRoutes.includes(hash)) {
-        hash = 'dashboard';
-        window.location.hash = hash;
-      }
-      this.showPrivateRoute(hash);
+      return;
     }
+
+    if (!user) {
+      return;
+    }
+
+    if (!hasRoutePermission(role, hash)) {
+      hash = getDefaultRoute(role);
+      window.location.hash = hash;
+    }
+
+    if (!this.privateRoutes.includes(hash)) {
+      hash = getDefaultRoute(role);
+      window.location.hash = hash;
+    }
+
+    state.set('currentRoute', hash);
+    this.showPrivateRoute(hash);
   }
 
   navigate(route) {
@@ -48,28 +65,27 @@ class Router {
     const app = document.getElementById('app');
     const shopContainer = document.getElementById('shop-container');
 
-    // Hide ALL admin elements
-    if (loginScreen) loginScreen.style.display = 'none';
-    if (app) app.style.display = 'none';
+    if (loginScreen) {
+      loginScreen.style.display = 'none';
+    }
+    if (app) {
+      app.style.display = 'none';
+    }
 
-    // Show shop with proper isolation
     if (shopContainer) {
       shopContainer.style.display = 'block';
       shopContainer.classList.add('active');
     }
 
-    // Add class to body for CSS isolation
     document.body.classList.add('shop-active');
     document.body.classList.remove('app-active');
-
-    state.set('currentRoute', route);
 
     if (route === 'shop') {
       try {
         const { default: Shop } = await import('../modules/shop/shop.js');
         await Shop.load();
       } catch (error) {
-        console.error('Error loading Shop module:', error);
+        logger.error('Router', 'Error loading Shop module', error);
       }
     }
   }
@@ -78,11 +94,12 @@ class Router {
     const app = document.getElementById('app');
     const shopContainer = document.getElementById('shop-container');
 
-    // Remove shop isolation
     document.body.classList.remove('shop-active');
     document.body.classList.add('app-active');
 
-    if (app) app.style.display = 'grid';
+    if (app) {
+      app.style.display = 'grid';
+    }
     if (shopContainer) {
       shopContainer.style.display = 'none';
       shopContainer.classList.remove('active');

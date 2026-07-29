@@ -35,6 +35,11 @@ class Repository {
     return item;
   }
 
+  async saveAll(items) {
+    await this.db.putAll(this.storeName, items);
+    return items;
+  }
+
   async delete(id) {
     await this.db.delete(this.storeName, id);
   }
@@ -51,6 +56,35 @@ export const saleRepo = new Repository('sales');
 export const saleItemRepo = new Repository('sale_items');
 export const cashSessionRepo = new Repository('cash_sessions');
 export const cashMovementRepo = new Repository('cash_movements');
+export const cashClosureRepo = new Repository('cash_closures');
 export const settingRepo = new Repository('settings');
 export const userRepo = new Repository('users');
 export const notificationRepo = new Repository('notifications');
+export const backupSnapshotRepo = new Repository('backup_snapshots');
+export const counterRepo = new Repository('counters');
+export const paymentMethodRepo = new Repository('payment_methods');
+
+const SALE_ID_KEY = 'saleSequence';
+
+export async function generateSaleId() {
+  const year = new Date().getFullYear();
+  return new Promise((resolve, reject) => {
+    const transaction = db.db.transaction('counters', 'readwrite');
+    const store = transaction.objectStore('counters');
+
+    const getReq = store.get(SALE_ID_KEY);
+    getReq.onsuccess = () => {
+      let nextVal;
+      if (getReq.result) {
+        nextVal = getReq.result.value + 1;
+        store.put({ id: SALE_ID_KEY, value: nextVal });
+      } else {
+        nextVal = 1;
+        store.add({ id: SALE_ID_KEY, value: 1 });
+      }
+      const padded = String(nextVal).padStart(6, '0');
+      resolve(`S-${year}-${padded}`);
+    };
+    getReq.onerror = () => reject(getReq.error);
+  });
+}

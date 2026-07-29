@@ -72,30 +72,35 @@ POS/
 ## 🚀 Instalación y Uso
 
 ### Requisitos Previos
+
 - Un navegador moderno (Chrome, Firefox, Edge, Safari)
 - Un servidor web local (opcional, pero recomendado para evitar problemas con módulos ES6)
 
 ### Pasos para Ejecutar Localmente
 
 1. **Clonar o descargar el proyecto**
+
    ```bash
    git clone <repo-url>
    cd POS
    ```
 
 2. **Iniciar un servidor local** (Debido al uso de módulos ES6):
-   
+
    Con Python:
+
    ```bash
    python -m http.server 8000
    ```
-   
+
    Con Node.js (npx):
+
    ```bash
    npx serve
    ```
-   
+
    Con PHP:
+
    ```bash
    php -S localhost:8000
    ```
@@ -128,16 +133,19 @@ El sistema viene con dos usuarios predefinidos:
 ## 🎨 Personalización
 
 ### Cambiar Moneda y Configuración
+
 1. Inicia sesión como administrador
 2. Ve a Configuración
 3. Modifica la información del negocio, moneda, tasa de impuestos, etc.
 
 ### Cambiar Colores (Tema)
+
 Edita las variables CSS en `css/variables.css`:
+
 ```css
 :root {
-  --color-primary: #7C3AED;  /* Color principal (violeta) */
-  --color-primary-dark: #6D28D9;
+  --color-primary: #7c3aed; /* Color principal (violeta) */
+  --color-primary-dark: #6d28d9;
   /* ... más variables */
 }
 ```
@@ -145,11 +153,13 @@ Edita las variables CSS en `css/variables.css`:
 ## 💾 Respaldo y Restauración
 
 ### Exportar Datos
+
 1. Ve a Configuración
 2. Haz clic en "Exportar Base de Datos"
 3. Se descargará un archivo JSON con todos los datos
 
 ### Importar Datos
+
 1. Ve a Configuración
 2. Haz clic en "Importar Base de Datos"
 3. Selecciona un archivo JSON previamente exportado

@@ -1,10 +1,20 @@
 'use strict';
 
-import { cashSessionRepo, cashMovementRepo, saleRepo } from '../../db/repositories.js';
+import {
+  cashSessionRepo,
+  cashMovementRepo,
+  cashClosureRepo,
+  saleRepo,
+  productRepo,
+  saleItemRepo,
+  customerRepo
+} from '../../db/repositories.js';
 import Modal from '../../components/modal.js';
 import Toast from '../../components/toast.js';
-import { getPayments, getMethodTotal } from '../../utils/payments.js';
+import { getPayments, PAYMENT_METHODS } from '../../utils/payments.js';
 import state from '../../js/state.js';
+import { exportCashToPDF } from '../../utils/pdfExport.js';
+import { logger } from '../../utils/logger.js';
 
 class CashService {
   constructor() {
@@ -64,7 +74,7 @@ class CashService {
     return session;
   }
 
-  async closeSession(finalAmount, observation = '') {
+  async closeSession(finalAmount, observation = '', cashCounts = null) {
     if (!this.currentSession) {
       throw new Error('No hay sesión de caja abierta');
     }
@@ -72,14 +82,114 @@ class CashService {
     if (isNaN(amount) || amount < 0) {
       throw new Error('Monto final inválido');
     }
+
+    const summary = await this.getSessionSummary();
+    if (!summary) {
+      throw new Error('No se pudo calcular el resumen de caja');
+    }
+
     this.currentSession.closedAt = new Date().toISOString();
     this.currentSession.finalAmount = amount;
     this.currentSession.closeObservation = observation || '';
     await cashSessionRepo.update(this.currentSession);
+
+    const closure = await this._createClosure(summary, amount, observation, cashCounts);
     this.currentSession = null;
+
+    try {
+      const settings = state.get('settings');
+      await exportCashToPDF(closure, closure.movements, settings);
+    } catch {
+      /* PDF auto-download best-effort */
+    }
+
+    return closure;
   }
 
-  async addMovement(type, amount, description = '') {
+  async _createClosure(summary, finalAmount, observation, cashCounts = null) {
+    const session = summary.session;
+    const difference = finalAmount - summary.expectedTotal;
+    const closure = {
+      id: `closure_${Date.now()}`,
+      sessionId: session.id,
+      closedAt: session.closedAt,
+      openedAt: session.openedAt,
+      initialAmount: summary.initialAmount,
+      manualIn: summary.manualIn,
+      manualOut: summary.manualOut,
+      cashSales: summary.cashSales,
+      transferSales: summary.transferSales,
+      debitSales: summary.debitSales,
+      accountSales: summary.accountSales,
+      totalSales: summary.totalSales,
+      expectedTotal: summary.expectedTotal,
+      methods: summary.methods || null,
+      finalAmount: finalAmount,
+      difference: difference,
+      userId: session.userId,
+      userName: session.userName,
+      observation: session.observation,
+      closeObservation: observation || '',
+      salesCount: summary.salesCount,
+      movements: summary.movements.map(m => ({ ...m })),
+      cashCounts: cashCounts
+    };
+    await cashClosureRepo.create(closure);
+    return closure;
+  }
+
+  async cancelSale(sale) {
+    try {
+      const session = await this.getActiveSession();
+      if (!session) {
+        return;
+      }
+
+      const user = state.get('currentUser');
+      const payments = getPayments(sale);
+      for (const p of payments) {
+        await cashMovementRepo.create({
+          id: `mov_${Date.now()}_cancel_${sale.id.replace(/[^a-zA-Z0-9]/g, '_')}_${p.method}_${Math.random().toString(36).slice(2, 6)}`,
+          sessionId: session.id,
+          type: 'cancellation',
+          paymentMethod: p.method,
+          amount: -p.amount,
+          description: `Cancelación venta ${sale.id} ${p.method}`,
+          date: new Date().toISOString(),
+          userId: user?.id,
+          saleId: sale.id
+        });
+      }
+
+      await saleRepo.update({ ...sale, status: 'cancelled' });
+
+      state.emit('data:sales-changed');
+
+      const items = await saleItemRepo.query('saleId', sale.id);
+      for (const item of items) {
+        if (item.productId && item.quantity) {
+          const product = await productRepo.findById(item.productId);
+          if (product && !product.variablePrice) {
+            await productRepo.update({ ...product, stock: (product.stock || 0) + item.quantity });
+          }
+        }
+      }
+
+      const accountPayment = payments.find(p => p.method === 'account');
+      if (accountPayment && accountPayment.amount > 0 && sale.customerId && sale.customerId !== 'cust_final') {
+        const customer = await customerRepo.findById(sale.customerId);
+        if (customer) {
+          await customerRepo.update({ ...customer, balance: (customer.balance || 0) - accountPayment.amount });
+          state.emit('data:customers-changed');
+        }
+      }
+    } catch (error) {
+      logger.error('CashService', 'Error cancelling sale', error);
+      throw new Error('No se pudo cancelar la venta');
+    }
+  }
+
+  async addMovement(type, amount, description = '', paymentMethod = 'cash') {
     if (!this.currentSession) {
       throw new Error('No hay sesión de caja abierta');
     }
@@ -89,9 +199,10 @@ class CashService {
     }
     const user = state.get('currentUser');
     const movement = {
-      id: `mov_${Date.now()}`,
+      id: `mov_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       sessionId: this.currentSession.id,
       type,
+      paymentMethod,
       amount: value,
       description: description || '',
       date: new Date().toISOString(),
@@ -102,17 +213,19 @@ class CashService {
   }
 
   async recordSale(sale) {
-    if (!this.currentSession) return;
+    if (!this.currentSession) {
+      return;
+    }
     const user = state.get('currentUser');
     const payments = getPayments(sale);
     for (const p of payments) {
       await cashMovementRepo.create({
-        id: `mov_${Date.now()}_sale_${sale.id.substring(0, 8)}_${p.method}`,
+        id: `mov_${Date.now()}_sale_${sale.id.replace(/[^a-zA-Z0-9]/g, '_')}_${p.method}`,
         sessionId: this.currentSession.id,
         type: 'sale',
         paymentMethod: p.method,
         amount: p.amount,
-        description: `Venta #${sale.id.substring(0, 8)} ${p.method}`,
+        description: `Venta ${sale.id} ${p.method}`,
         date: new Date().toISOString(),
         userId: user?.id,
         saleId: sale.id
@@ -120,43 +233,123 @@ class CashService {
     }
   }
 
-  async getMovements() {
-    if (!this.currentSession) return [];
+  async getMovementsForSession(sessionId) {
     try {
-      return await cashMovementRepo.query('sessionId', this.currentSession.id) || [];
+      return (await cashMovementRepo.query('sessionId', sessionId)) || [];
     } catch {
       return [];
     }
   }
 
-  async getSessionSummary() {
-    if (!this.currentSession) return null;
-    const movements = await this.getMovements();
-    const allSales = await saleRepo.findAll() || [];
-    const sessionSales = allSales.filter(s => s.sessionId === this.currentSession.id);
+  async getMovements() {
+    if (!this.currentSession) {
+      return [];
+    }
+    return this.getMovementsForSession(this.currentSession.id);
+  }
+
+  async getSummaryForSession(sessionId) {
+    const session = await cashSessionRepo.findById(sessionId);
+    if (!session) {
+      return null;
+    }
+
+    const movements = await this.getMovementsForSession(sessionId);
+    const allSales = (await saleRepo.findAll()) || [];
+    const sessionSales = allSales.filter(s => s.sessionId === sessionId && s.status !== 'cancelled');
 
     const opening = movements.find(m => m.type === 'opening');
-    const initialAmount = opening ? parseFloat(opening.amount) : (parseFloat(this.currentSession.initialAmount) || 0);
+    const initialAmount = opening ? parseFloat(opening.amount) : parseFloat(session.initialAmount) || 0;
+
+    const methodsMap = {};
+    for (const pm of PAYMENT_METHODS) {
+      methodsMap[pm.id] = { sales: 0, manualIn: 0, manualOut: 0, net: 0 };
+    }
+
+    for (const sale of sessionSales) {
+      const payments = getPayments(sale);
+      for (const p of payments) {
+        if (!methodsMap[p.method]) {
+          methodsMap[p.method] = { sales: 0, manualIn: 0, manualOut: 0, net: 0 };
+        }
+        methodsMap[p.method].sales += p.amount;
+      }
+    }
+
+    for (const m of movements) {
+      if (m.type === 'in' || m.type === 'out') {
+        const method = m.paymentMethod || 'cash';
+        if (!methodsMap[method]) {
+          methodsMap[method] = { sales: 0, manualIn: 0, manualOut: 0, net: 0 };
+        }
+        if (m.type === 'in') {
+          methodsMap[method].manualIn += parseFloat(m.amount);
+        } else {
+          methodsMap[method].manualOut += parseFloat(m.amount);
+        }
+      }
+    }
+
+    for (const id of Object.keys(methodsMap)) {
+      const d = methodsMap[id];
+      d.net = d.sales + d.manualIn - d.manualOut;
+    }
+
     const manualIn = movements.filter(m => m.type === 'in').reduce((s, m) => s + parseFloat(m.amount), 0);
     const manualOut = movements.filter(m => m.type === 'out').reduce((s, m) => s + parseFloat(m.amount), 0);
-    const cashSales = sessionSales.reduce((s, sale) => s + getMethodTotal(sale, 'cash'), 0);
-    const transferSales = sessionSales.reduce((s, sale) => s + getMethodTotal(sale, 'transfer'), 0);
-    const debitSales = sessionSales.reduce((s, sale) => s + getMethodTotal(sale, 'debit'), 0);
-    const accountSales = sessionSales.reduce((s, sale) => s + getMethodTotal(sale, 'account'), 0);
+    const cashSales = methodsMap['cash']?.sales || 0;
+    const transferSales = methodsMap['transfer']?.sales || 0;
+    const debitSales = methodsMap['debit']?.sales || 0;
+    const accountSales = methodsMap['account']?.sales || 0;
     const totalSales = sessionSales.reduce((s, sale) => s + parseFloat(sale.total), 0);
-    const expectedTotal = initialAmount + manualIn - manualOut + cashSales;
+    const cashManualIn = methodsMap['cash']?.manualIn || 0;
+    const cashManualOut = methodsMap['cash']?.manualOut || 0;
+    const expectedTotal = initialAmount + cashManualIn - cashManualOut + cashSales;
 
     return {
-      initialAmount, manualIn, manualOut,
-      cashSales, transferSales, debitSales, accountSales,
-      totalSales, expectedTotal,
-      session: this.currentSession,
-      movements, salesCount: sessionSales.length
+      initialAmount,
+      manualIn,
+      manualOut,
+      cashSales,
+      transferSales,
+      debitSales,
+      accountSales,
+      totalSales,
+      expectedTotal,
+      methods: methodsMap,
+      session,
+      movements,
+      salesCount: sessionSales.length
     };
   }
 
+  async getSessionSummary() {
+    if (!this.currentSession) {
+      return null;
+    }
+    return this.getSummaryForSession(this.currentSession.id);
+  }
+
+  async getAllClosedSessions() {
+    try {
+      const sessions = await cashSessionRepo.findAll();
+      return sessions.filter(s => s.closedAt).sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt));
+    } catch {
+      return [];
+    }
+  }
+
+  async getClosures() {
+    try {
+      const closures = await cashClosureRepo.findAll();
+      return closures.sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt));
+    } catch {
+      return [];
+    }
+  }
+
   _showForcedOpenModal() {
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       const body = `
         <div class="cash-open-modal">
           <div class="cash-open-modal__icon">
@@ -190,7 +383,7 @@ class CashService {
         closable: false
       });
 
-      document.getElementById('open-cash-confirm').onclick = async () => {
+      document.getElementById('open-cash-confirm')?.addEventListener('click', async () => {
         const amount = document.getElementById('open-cash-amount')?.value;
         const obs = document.getElementById('open-cash-obs')?.value || '';
         if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) < 0) {
@@ -205,13 +398,13 @@ class CashService {
         } catch (err) {
           Toast.error('Error', err.message);
         }
-      };
+      });
 
-      document.getElementById('open-cash-cancel').onclick = () => {
+      document.getElementById('open-cash-cancel')?.addEventListener('click', () => {
         Modal.close();
         window.location.hash = 'dashboard';
         resolve();
-      };
+      });
     });
   }
 }
